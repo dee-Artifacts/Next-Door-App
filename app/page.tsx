@@ -24,6 +24,7 @@ import {
   MapPin
 } from "lucide-react";
 import { FAQ_ITEMS } from "@/src/lib/faq-data";
+import { SOCIAL_LINKS } from "@/src/lib/social-links";
 
 const EXPLORE_MORE_URL = "https://www.deeproduct.org/";
 const GITHUB_URL = "https://github.com/deepakkrishnar1618-svg/Next-Door-App";
@@ -782,12 +783,28 @@ export default function HomePage() {
               <p className="text-white/65 text-sm leading-relaxed">
                 A private, self-hosted hub for your street, block, or building. Chat, events, and a local marketplace in one place.
               </p>
+              <div className="flex flex-wrap items-center gap-2.5 mt-6">
+                {SOCIAL_LINKS.map(({ name, href, Icon }) => (
+                  <a
+                    key={name}
+                    href={href}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    aria-label={name}
+                    title={name}
+                    className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/10 text-white/75 hover:bg-white/20 hover:text-white transition-colors"
+                  >
+                    <Icon className="h-[18px] w-[18px]" />
+                  </a>
+                ))}
+              </div>
             </div>
             <nav className="flex flex-wrap gap-x-8 gap-y-3 text-sm text-white/75">
               <a href="#features" className="hover:text-white transition-colors">Features</a>
               <a href="#how" className="hover:text-white transition-colors">How it works</a>
               <a href="#security" className="hover:text-white transition-colors">Privacy</a>
               <a href="#faq" className="hover:text-white transition-colors">FAQ</a>
+              <Link href="/contact" className="hover:text-white transition-colors">Contact</Link>
               <a href={GITHUB_URL} target="_blank" rel="noopener noreferrer" className="hover:text-white transition-colors">GitHub</a>
             </nav>
           </div>
