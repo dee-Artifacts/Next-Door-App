@@ -16,17 +16,17 @@ export type SocialLink = {
   Icon: React.FC<{ className?: string }>;
 };
 
-// The Deeproduct / Deeportfolio marks carry ~18% built-in padding inside their
-// 256×256 viewBox, so they read smaller than the edge-to-edge brand glyphs.
-// Scale them up so they fill the icon chip with similar visual weight.
+// The Deeproduct / Deeportfolio PNGs are full-bleed rounded-square app marks
+// (the coloured background is baked in), so they fill the icon chip on their own
+// — no extra scaling needed.
 const Deeproduct: React.FC<{ className?: string }> = ({ className = "" }) => (
   // eslint-disable-next-line @next/next/no-img-element
-  <img src="/Deeproduct.svg" alt="" aria-hidden="true" className={`${className} scale-[1.55]`} />
+  <img src="/Deeproduct.png" alt="" aria-hidden="true" className={className} />
 );
 
 const Deeportfolio: React.FC<{ className?: string }> = ({ className = "" }) => (
   // eslint-disable-next-line @next/next/no-img-element
-  <img src="/Deeportfolio.svg" alt="" aria-hidden="true" className={`${className} scale-[1.55]`} />
+  <img src="/Deeportfolio.png" alt="" aria-hidden="true" className={className} />
 );
 
 const LinkedIn: React.FC<{ className?: string }> = ({ className = "" }) => (
