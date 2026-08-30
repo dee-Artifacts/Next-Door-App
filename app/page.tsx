@@ -25,6 +25,7 @@ import {
 } from "lucide-react";
 import { FAQ_ITEMS } from "@/src/lib/faq-data";
 import { SOCIAL_LINKS } from "@/src/lib/social-links";
+import { track } from "@/src/lib/analytics";
 
 const EXPLORE_MORE_URL = "https://www.deeproduct.org/";
 const GITHUB_URL = "https://github.com/deepakkrishnar1618-svg/Next-Door-App";
@@ -174,11 +175,14 @@ const Eyebrow = ({ children }: { children: React.ReactNode }) => (
 function CtaPair({
   onGuest,
   onGoogle,
+  placement,
   variant = "light",
   className = ""
 }: {
   onGuest: () => void;
   onGoogle: () => void;
+  /** Which section of the page this pair sits in — the whole point of the event. */
+  placement: string;
   variant?: "light" | "forest";
   className?: string;
 }) {
@@ -194,11 +198,17 @@ function CtaPair({
     "w-full sm:w-auto inline-flex items-center justify-center gap-2 rounded-full px-6 py-3 text-sm font-medium font-inter transition-colors";
   return (
     <div className={`flex flex-col-reverse sm:flex-row items-center gap-3 w-full sm:w-auto ${className}`}>
-      <button onClick={onGuest} className={`${base} ${guest}`}>
+      <button
+        onClick={() => { track("signin-click", { method: "guest", placement }); onGuest(); }}
+        className={`${base} ${guest}`}
+      >
         <User className="w-[18px] h-[18px] shrink-0" />
         <span>Guest Access</span>
       </button>
-      <button onClick={onGoogle} className={`${base} ${google}`}>
+      <button
+        onClick={() => { track("signin-click", { method: "google", placement }); onGoogle(); }}
+        className={`${base} ${google}`}
+      >
         <GoogleGlyph />
         <span>Sign in with Google</span>
       </button>
@@ -270,7 +280,12 @@ export default function HomePage() {
     );
   }
 
-  const toggleFaq = (index: number) => setActiveFaq(activeFaq === index ? null : index);
+  const toggleFaq = (index: number) => {
+    const opening = activeFaq !== index;
+    // Only the open is a signal; a collapse is just tidying up.
+    if (opening) track("faq-open", { faq: FAQ_ITEMS[index].id });
+    setActiveFaq(opening ? index : null);
+  };
   const goGuest = () => redirectToGuestLogin();
   const goGoogle = () => redirectToLogin();
 
@@ -292,8 +307,8 @@ export default function HomePage() {
             <span className="hidden sm:inline text-black/55 truncate">Live demonstration · data resets periodically</span>
           </div>
           <div className="flex items-center gap-4 text-black/55 shrink-0">
-            <a href={GITHUB_URL} target="_blank" rel="noopener noreferrer" className="hover:text-archio-forest transition-colors">GitHub</a>
-            <a href={EXPLORE_MORE_URL} target="_blank" rel="noopener noreferrer" className="hover:text-archio-forest transition-colors inline-flex items-center gap-1">
+            <a href={GITHUB_URL} onClick={() => track("install-click", { placement: "nav" })} target="_blank" rel="noopener noreferrer" className="hover:text-archio-forest transition-colors">GitHub</a>
+            <a href={EXPLORE_MORE_URL} onClick={() => track("social-click", { network: "deeproduct", placement: "nav" })} target="_blank" rel="noopener noreferrer" className="hover:text-archio-forest transition-colors inline-flex items-center gap-1">
               <span className="hidden sm:inline">Explore more</span>
               <ArrowUpRight className="w-3.5 h-3.5 shrink-0" />
             </a>
@@ -337,14 +352,14 @@ export default function HomePage() {
               {signInMenuOpen && (
                 <div className="absolute right-0 mt-2 w-64 bg-white border border-black/10 rounded-2xl shadow-2xl p-2 z-50 animate-in flex flex-col gap-1.5">
                   <button
-                    onClick={() => { setSignInMenuOpen(false); goGoogle(); }}
+                    onClick={() => { setSignInMenuOpen(false); track("signin-click", { method: "google", placement: "header" }); goGoogle(); }}
                     className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl text-sm font-medium text-white bg-archio-forest hover:bg-archio-forest-dark transition-colors"
                   >
                     <GoogleGlyph />
                     <span>Sign in with Google</span>
                   </button>
                   <button
-                    onClick={() => { setSignInMenuOpen(false); goGuest(); }}
+                    onClick={() => { setSignInMenuOpen(false); track("signin-click", { method: "guest", placement: "header" }); goGuest(); }}
                     className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl text-sm font-medium text-archio-ink bg-transparent hover:bg-black/5 border border-black/10 transition-colors"
                   >
                     <User className="w-[18px] h-[18px] shrink-0" />
@@ -372,9 +387,9 @@ export default function HomePage() {
             <a href="#how" onClick={() => setMobileMenuOpen(false)} className="text-lg text-black/70 hover:text-archio-forest transition-colors">How it works</a>
             <a href="#security" onClick={() => setMobileMenuOpen(false)} className="text-lg text-black/70 hover:text-archio-forest transition-colors">Privacy</a>
             <a href="#faq" onClick={() => setMobileMenuOpen(false)} className="text-lg text-black/70 hover:text-archio-forest transition-colors">FAQ</a>
-            <a href={GITHUB_URL} target="_blank" rel="noopener noreferrer" className="text-lg text-black/70 hover:text-archio-forest transition-colors">GitHub Repository</a>
+            <a href={GITHUB_URL} onClick={() => track("install-click", { placement: "mobile-menu" })} target="_blank" rel="noopener noreferrer" className="text-lg text-black/70 hover:text-archio-forest transition-colors">GitHub Repository</a>
             <hr className="border-black/10" />
-            <CtaPair onGuest={goGuest} onGoogle={goGoogle} variant="light" className="!flex-col" />
+            <CtaPair placement="mobile-menu" onGuest={goGuest} onGoogle={goGoogle} variant="light" className="!flex-col" />
           </div>
         )}
       </header>
@@ -398,7 +413,7 @@ export default function HomePage() {
               Connect with your apartment building, street, or local group. Chat in real time, organise events, and buy, sell, or rent items, all in one secure, private place.
             </p>
 
-            <CtaPair onGuest={goGuest} onGoogle={goGoogle} variant="light" />
+            <CtaPair placement="hero" onGuest={goGuest} onGoogle={goGoogle} variant="light" />
 
             <div className="mt-9 flex flex-wrap items-center gap-x-6 gap-y-2 text-sm text-black/55">
               <span className="inline-flex items-center gap-1.5"><Check className="w-4 h-4 text-archio-forest shrink-0" /> Private by default</span>
@@ -563,7 +578,7 @@ export default function HomePage() {
                   Jump straight into the live demo. No account required for guest access.
                 </p>
               </div>
-              <CtaPair onGuest={goGuest} onGoogle={goGoogle} variant="forest" className="!flex-col !items-stretch" />
+              <CtaPair placement="features" onGuest={goGuest} onGoogle={goGoogle} variant="forest" className="!flex-col !items-stretch" />
             </div>
           </div>
 
@@ -657,7 +672,7 @@ export default function HomePage() {
                 Unlike public social networks, Next Door is self-hosted and private. You keep full control of your messages, events, and emails, completely free from ads and trackers.
               </p>
 
-              <CtaPair onGuest={goGuest} onGoogle={goGoogle} variant="forest" />
+              <CtaPair placement="security" onGuest={goGuest} onGoogle={goGoogle} variant="forest" />
 
               <div className="mt-10 flex flex-wrap gap-x-6 gap-y-3">
                 {TRUST_BADGES.map((badge) => (
@@ -707,7 +722,7 @@ export default function HomePage() {
                     <p className="text-xs text-black/55">Open source · self-hostable</p>
                   </div>
                 </div>
-                <CtaPair onGuest={goGuest} onGoogle={goGoogle} variant="light" className="!flex-col !items-stretch" />
+                <CtaPair placement="faq" onGuest={goGuest} onGoogle={goGoogle} variant="light" className="!flex-col !items-stretch" />
               </div>
             </div>
 
@@ -745,7 +760,7 @@ export default function HomePage() {
             <p className="text-black/60 text-lg max-w-xl mx-auto mb-8">
               Try the live demo now. Sign in with Google, or jump in instantly as a guest.
             </p>
-            <CtaPair onGuest={goGuest} onGoogle={goGoogle} variant="light" className="justify-center" />
+            <CtaPair placement="footer-cta" onGuest={goGuest} onGoogle={goGoogle} variant="light" className="justify-center" />
             <p className="text-xs text-black/45 mt-5">This is a live demo · data resets periodically.</p>
           </div>
 
@@ -759,7 +774,7 @@ export default function HomePage() {
               </p>
             </div>
             <a
-              href={EXPLORE_MORE_URL}
+              href={EXPLORE_MORE_URL} onClick={() => track("social-click", { network: "deeproduct", placement: "explore-band" })}
               target="_blank"
               rel="noopener noreferrer"
               className="w-full md:w-auto shrink-0 inline-flex items-center justify-center gap-2 bg-white text-archio-forest hover:bg-archio-cream font-medium py-3.5 px-7 rounded-full transition-colors whitespace-nowrap"
@@ -788,6 +803,7 @@ export default function HomePage() {
                   <a
                     key={name}
                     href={href}
+                    onClick={() => track("social-click", { network: name.toLowerCase(), placement: "footer" })}
                     target="_blank"
                     rel="noopener noreferrer"
                     aria-label={name}
@@ -805,7 +821,7 @@ export default function HomePage() {
               <a href="#security" className="hover:text-white transition-colors">Privacy</a>
               <a href="#faq" className="hover:text-white transition-colors">FAQ</a>
               <Link href="/contact" className="hover:text-white transition-colors">Contact</Link>
-              <a href={GITHUB_URL} target="_blank" rel="noopener noreferrer" className="hover:text-white transition-colors">GitHub</a>
+              <a href={GITHUB_URL} onClick={() => track("install-click", { placement: "footer-nav" })} target="_blank" rel="noopener noreferrer" className="hover:text-white transition-colors">GitHub</a>
             </nav>
           </div>
 
@@ -814,7 +830,7 @@ export default function HomePage() {
             <div className="flex flex-wrap justify-center gap-6">
               <Link href="/privacy" target="_blank" rel="noopener noreferrer" className="hover:text-white transition-colors">Privacy Policy</Link>
               <Link href="/terms" target="_blank" rel="noopener noreferrer" className="hover:text-white transition-colors">Terms of Service</Link>
-              <a href={GITHUB_URL} target="_blank" rel="noopener noreferrer" className="hover:text-white transition-colors">GitHub Repo</a>
+              <a href={GITHUB_URL} onClick={() => track("install-click", { placement: "footer-meta" })} target="_blank" rel="noopener noreferrer" className="hover:text-white transition-colors">GitHub Repo</a>
             </div>
           </div>
         </div>

@@ -8,6 +8,7 @@
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
 import { createClient } from './supabase/client';
 import type { User } from '@supabase/supabase-js';
+import { trackOnce } from "@/src/lib/analytics";
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL || '';
 
@@ -57,6 +58,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const redirectToGuestLogin = async () => {
     const { error } = await supabase.auth.signInAnonymously();
+    if (!error) trackOnce("nd_demo_entered", "demo-entered", { method: "guest" });
     if (error) {
       console.error("Anonymous auth error:", error.message);
       alert("Guest login is not available. Please sign in with Google.");

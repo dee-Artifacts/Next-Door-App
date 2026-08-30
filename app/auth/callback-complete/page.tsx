@@ -2,6 +2,7 @@
 
 import { useEffect } from "react";
 import { useAuth } from "@/src/lib/auth-hook";
+import { trackOnce } from "@/src/lib/analytics";
 import { useRouter } from "next/navigation";
 
 export default function AuthCallbackPage() {
@@ -32,6 +33,7 @@ export default function AuthCallbackPage() {
           }
 
           const profileData = await profileResponse.json();
+          trackOnce("nd_demo_entered", "demo-entered", { method: "google" });
           if (profileData.profile_completed) router.push("/chat");
           else router.push("/profile/setup");
         }

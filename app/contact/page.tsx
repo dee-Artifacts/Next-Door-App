@@ -64,11 +64,17 @@ export default function ContactPage() {
           <ul className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-5 mt-10 sm:mt-12">
             {SOCIAL_LINKS.map(({ name, handle, href, accent, Icon }) => (
               <li key={name}>
+                {/* Data attributes rather than a track() call: this page is a server
+                    component and exports metadata, so an onClick would force it
+                    client-side. The tracker reads these off the DOM on click. */}
                 <a
                   href={href}
                   target="_blank"
                   rel="noopener noreferrer"
                   aria-label={`${name} — ${handle}`}
+                  data-umami-event="social-click"
+                  data-umami-event-network={name.toLowerCase()}
+                  data-umami-event-placement="contact"
                   className="group flex items-center gap-4 rounded-[20px] border border-black/10 bg-white p-5 transition-all duration-200 hover:-translate-y-0.5 hover:border-black/20 hover:shadow-soft"
                 >
                   <span

@@ -41,7 +41,7 @@ export default function CookiePolicy() {
               Essential Cookies We Use
             </h2>
             <p className="text-slate-600 dark:text-slate-300 leading-relaxed mb-4">
-              Next Door uses only essential cookies that are strictly necessary for the application to function. We do not use any tracking, advertising, or analytics cookies.
+              Next Door uses only essential cookies that are strictly necessary for the application to function. We do not use any tracking, advertising, or analytics cookies. We do measure basic, anonymous site usage without cookies &mdash; see <span className="font-medium">Analytics Without Cookies</span> below.
             </p>
             
             <div className="bg-slate-50 dark:bg-dark-surface rounded-xl p-6 space-y-4">
@@ -124,6 +124,26 @@ export default function CookiePolicy() {
               <li>We do not share cookie data with third parties for their own purposes</li>
               <li>We do not use cookies to build a profile of your interests</li>
               <li>We do not use analytics cookies to monitor user behavior patterns</li>
+            </ul>
+          </section>
+
+          <section className="mb-8">
+            <h2 className="text-xl font-semibold text-slate-800 dark:text-white mb-4">
+              Analytics Without Cookies
+            </h2>
+            <p className="text-slate-600 dark:text-slate-300 leading-relaxed mb-4">
+              We use <span className="font-medium">Umami</span>, a privacy-focused analytics tool, to understand how the public site is used &mdash; for example which pages are opened and which links are clicked. Umami is self-hosted on infrastructure we control, so this data is never sold, shared, or handed to an advertising network.
+            </p>
+            <p className="text-slate-600 dark:text-slate-300 leading-relaxed mb-4">
+              This is why it does not require your consent under cookie law:
+            </p>
+            <ul className="list-disc pl-6 text-slate-600 dark:text-slate-300 space-y-2">
+              <li>It sets <span className="font-medium">no cookies</span> and stores nothing on your device</li>
+              <li>It does not collect or store any personal data, and never records your name, email, or account ID</li>
+              <li>It does not fingerprint you or follow you across other websites</li>
+              <li>It records anonymous, aggregated counts only &mdash; page views and a small number of link clicks, such as which of our social links people follow</li>
+              <li>It records only which page was opened, never what is on it &mdash; no message, listing, event, or profile content is ever collected</li>
+              <li>Where a web address contains an account or item identifier, that identifier is stripped out before anything is recorded</li>
             </ul>
           </section>
 
