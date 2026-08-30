@@ -15,11 +15,14 @@ const nextConfig = {
             key: 'Content-Security-Policy',
             value: [
               "default-src 'self'",
-              "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
+              "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://analytics.deeproduct.org",
               "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
               "font-src 'self' https://fonts.gstatic.com",
               "img-src 'self' data: https: blob:",
-              "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://api.resend.com",
+              // analytics.deeproduct.org is the self-hosted Umami tracker. It needs both:
+              // script-src to load script.js, and connect-src for the POST to /api/send.
+              // Omit either and the tag still renders while every event silently vanishes.
+              "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://api.resend.com https://analytics.deeproduct.org",
               "media-src 'self' https: blob:",
               "frame-ancestors 'none'",
             ].join('; '),
