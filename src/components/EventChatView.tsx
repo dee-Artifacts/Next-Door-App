@@ -220,24 +220,7 @@ export default function EventChatView({ eventId, eventName, onBack }: EventChatV
           }
           
           setMessages(data);
-          
-          // Mark all messages as read
-          const messageIds = data
-            .filter((msg: any) => !msg.is_event_details && msg.user_id !== user?.id)
-            .map((msg: any) => msg.id);
-          
-          if (messageIds.length > 0) {
-            try {
-              await fetch(`/api/events/${eventId}/messages/read`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                credentials: 'include',
-                body: JSON.stringify({ message_ids: messageIds }),
-              });
-            } catch (error) {
-              console.error("Error marking messages as read:", error);
-            }
-          }
+          // Read receipts are sent by EventMessageList as messages come into view
         } else {
           console.error("Invalid response format from /api/events/:id/messages:", data);
           setMessages([]);

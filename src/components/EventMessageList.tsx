@@ -126,7 +126,6 @@ export default function EventMessageList({
   
   // Use external highlighted message ID if provided, otherwise use internal
   const highlightedMessageId = externalHighlightedMessageId ?? internalHighlightedMessageId;
-  const readTimeoutsRef = useRef<Map<number, NodeJS.Timeout>>(new Map());
   const [lastReadMessageId, setLastReadMessageId] = useState<number | null>(null);
   
   // Badge state management
@@ -344,51 +343,68 @@ export default function EventMessageList({
     };
   }, [messages]);
 
-  // Mark messages as read after they've been visible for 1.5 seconds
+  // Mark messages from others as read once they've been on screen for 1.5s.
+  // Each id is sent at most once, newly visible ids are batched into one request,
+  // and messages already read by us are never re-sent, so polling refreshes
+  // don't trigger new requests.
+  const sentReadIdsRef = useRef<Set<number>>(new Set());
+  const pendingReadIdsRef = useRef<Set<number>>(new Set());
+  const readFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const visibleMessagesRef = useRef(visibleMessages);
+  visibleMessagesRef.current = visibleMessages;
+  const showUnreadBadgeRef = useRef(showUnreadBadge);
+  showUnreadBadgeRef.current = showUnreadBadge;
+
   useEffect(() => {
-    const messagesToMark: number[] = [];
-
     visibleMessages.forEach((messageId) => {
+      if (sentReadIdsRef.current.has(messageId) || pendingReadIdsRef.current.has(messageId)) return;
       const message = regularMessages.find((m) => m.id === messageId);
-      if (message && message.user_id !== currentUserId) {
-        const existingTimeout = readTimeoutsRef.current.get(messageId);
-        if (existingTimeout) {
-          clearTimeout(existingTimeout);
-        }
-
-        const timeout = setTimeout(() => {
-          messagesToMark.push(messageId);
-          
-          // Mark as read
-          fetch(`/api/events/${eventId}/messages/read`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            credentials: 'include',
-            body: JSON.stringify({ message_ids: [messageId] }),
-          }).then(() => {
-            setLastReadMessageId(messageId);
-          }).catch((error) => {
-            console.error('Failed to mark event message as read:', error);
-          });
-
-          // If this is the first unread message being read, dismiss the badge
-          if (showUnreadBadge && messageId === initialFirstUnreadMessageId.current) {
-            setShowUnreadBadge(false);
-            sessionStorage.setItem(`dismissedEventUnreadBadge_${eventId}`, messageId.toString());
-          }
-
-          readTimeoutsRef.current.delete(messageId);
-        }, 1500);
-
-        readTimeoutsRef.current.set(messageId, timeout);
+      if (!message || message.user_id === currentUserId) return;
+      if (message.reads?.some((r) => r.user_id === currentUserId)) {
+        sentReadIdsRef.current.add(messageId);
       }
+      pendingReadIdsRef.current.add(messageId);
     });
 
+    if (pendingReadIdsRef.current.size === 0 || readFlushTimerRef.current) return;
+
+    readFlushTimerRef.current = setTimeout(() => {
+      readFlushTimerRef.current = null;
+      // Only messages still on screen after 1.5s count as read
+      const seen = Array.from(pendingReadIdsRef.current).filter((id) => visibleMessagesRef.current.has(id));
+      pendingReadIdsRef.current.clear();
+      if (seen.length === 0) return;
+
+      const toSend = seen.filter((id) => !sentReadIdsRef.current.has(id));
+      if (toSend.length > 0) {
+        toSend.forEach((id) => sentReadIdsRef.current.add(id));
+        fetch(`/api/events/${eventId}/messages/read`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ message_ids: toSend }),
+        }).catch((error) => {
+          console.error('Failed to mark event messages as read:', error);
+        });
+      }
+
+      const maxSeen = Math.max(...seen);
+      setLastReadMessageId((prev) => (prev && prev > maxSeen ? prev : maxSeen));
+
+      // If the first unread message has been read, dismiss the badge
+      const firstUnreadId = initialFirstUnreadMessageId.current;
+      if (showUnreadBadgeRef.current && firstUnreadId && seen.includes(firstUnreadId)) {
+        setShowUnreadBadge(false);
+        sessionStorage.setItem(`dismissedEventUnreadBadge_${eventId}`, firstUnreadId.toString());
+      }
+    }, 1500);
+  }, [visibleMessages, regularMessages, currentUserId, eventId]);
+
+  useEffect(() => {
     return () => {
-      readTimeoutsRef.current.forEach((timeout) => clearTimeout(timeout));
-      readTimeoutsRef.current.clear();
+      if (readFlushTimerRef.current) clearTimeout(readFlushTimerRef.current);
     };
-  }, [visibleMessages, regularMessages, currentUserId, eventId, showUnreadBadge]);
+  }, []);
 
   // Set up Intersection Observer for first unread message to dismiss badge
   useEffect(() => {

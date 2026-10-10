@@ -6,16 +6,21 @@ export async function POST(request: NextRequest) {
   if (!userId) return error('Unauthorized', 401);
 
   const body = await request.json().catch(() => ({}));
-  const messageIds: number[] = body.message_ids || [];
+  const messageIds: number[] = (Array.isArray(body.message_ids) ? body.message_ids : [])
+    .map(Number)
+    .filter((id: number) => Number.isInteger(id) && id > 0);
   if (!messageIds.length) return json({ success: true });
 
   const db = getServiceClient();
   const now = new Date().toISOString();
   const inserts = messageIds.map(id => ({ message_id: id, user_id: userId, read_at: now }));
-  await db.from('message_reads').upsert(inserts, { onConflict: 'message_id,user_id' });
+  // Keep the original read_at for messages that were already read
+  await db.from('message_reads').upsert(inserts, { onConflict: 'message_id,user_id', ignoreDuplicates: true });
 
-  // Update last_read_message_id
+  // Move last_read_message_id forward only; batches can arrive out of order
   const maxId = Math.max(...messageIds);
-  await db.from('users').update({ last_read_message_id: maxId }).eq('id', userId);
+  await db.from('users').update({ last_read_message_id: maxId })
+    .eq('id', userId)
+    .or(`last_read_message_id.is.null,last_read_message_id.lt.${maxId}`);
   return json({ success: true });
 }

@@ -15,9 +15,14 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   const { data: membership } = await db.from('event_members').select('id').eq('event_id', eventId).eq('user_id', userId).maybeSingle();
   if (!membership) return error('Not a member of this event', 403);
 
-  for (const messageId of message_ids) {
-    await db.from('event_message_reads')
-      .upsert({ event_message_id: messageId, user_id: userId, read_at: new Date().toISOString() }, { onConflict: 'event_message_id,user_id' });
+  const ids = message_ids.map(Number).filter((id: number) => Number.isInteger(id) && id > 0);
+  if (ids.length > 0) {
+    const now = new Date().toISOString();
+    // One upsert for the whole batch; keep the original read_at for messages already read
+    await db.from('event_message_reads').upsert(
+      ids.map((id: number) => ({ event_message_id: id, user_id: userId, read_at: now })),
+      { onConflict: 'event_message_id,user_id', ignoreDuplicates: true }
+    );
   }
 
   return json({ success: true });
