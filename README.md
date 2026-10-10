@@ -204,9 +204,9 @@ These keep the app tidy. Create three jobs at [cron-job.org](https://cron-job.or
 
 | Job | URL | Schedule | Method |
 |---|---|---|---|
-| Cleanup | `https://your-domain.com/api/cron/cleanup` | Every 15 min | POST |
+| Cleanup | `https://your-domain.com/api/cron/cleanup` | Once a month (re-run if `done` is `false`) | POST |
 | Email digest | `https://your-domain.com/api/cron` | Every 15 min | POST |
-| Purge guests | `https://your-domain.com/api/cron/purge-guests` | Once a day | POST |
+| Purge guests | `https://your-domain.com/api/cron/purge-guests` | Once a month (re-run if `done` is `false`) | POST |
 
 The email digest handler checks the admin schedule internally, so running it every 15 minutes is safe. Purge guests removes Guest Access accounts older than `GUEST_TTL_HOURS` (default 24).
 

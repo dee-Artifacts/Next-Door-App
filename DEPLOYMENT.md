@@ -46,12 +46,17 @@ Create **3 jobs** at https://cron-job.org. Each job sends the header `x-webhook-
 | Field | Value |
 |---|---|
 | URL | `https://nextdoor.deeproduct.org/api/cron/cleanup` |
-| Schedule | Every 15 minutes |
+| Schedule | Once a month, e.g. the 7th at 02:00 (`0 2 7 * *`) |
 | Method | POST |
 
 Handles:
-- Auto-deletes events that ended more than 24 hours ago.
+- Deletes events that ended more than 24 hours ago, archiving them to event history.
 - Expires stale announcements where `announcement_expires_at < NOW()`.
+
+The app hides events itself 24 hours after they end, so this job only reclaims
+space and can run rarely. It works in batches for up to ~20 seconds and is safe
+to re-run; if the response says `"done": false`, run it again (or schedule a few
+runs ten minutes apart on the same day, e.g. `0,10,20 2 7 * *`).
 
 ### Job 2: Email digest
 
@@ -70,10 +75,10 @@ Configure the schedule in Admin Settings, Email Notifications, Send Schedule.
 | Field | Value |
 |---|---|
 | URL | `https://nextdoor.deeproduct.org/api/cron/purge-guests` |
-| Schedule | Once a day, for example 04:00 |
+| Schedule | Once a month, e.g. the 7th at 02:00 (`0 2 7 * *`) |
 | Method | POST |
 
-Deletes Guest Access accounts older than `GUEST_TTL_HOURS` (default `24`): their content, their `users` row, and the underlying anonymous auth user, which frees Supabase MAU. A healthy response looks like `{"success":true,"purged":N,"ttl_hours":24}`.
+Deletes Guest Access accounts older than `GUEST_TTL_HOURS` (default `24`): their content, their `users` row, and the underlying anonymous auth user, which frees Supabase MAU. A healthy response looks like `{"success":true,"done":true,"purged":N,"ttl_hours":24}`. Like cleanup, it works in batches and is safe to re-run when `done` is `false`.
 
 ## Vercel
 

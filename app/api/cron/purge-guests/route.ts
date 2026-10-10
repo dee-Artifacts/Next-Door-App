@@ -15,9 +15,19 @@ import { getServiceClient } from '@/src/lib/api-helpers';
  * Note: user_id columns have no DB-level FK cascade, so references are cleared
  * explicitly below. Each delete is best-effort: a missing table/column is logged
  * and skipped rather than aborting the whole purge.
+ *
+ * Runs monthly, so it works in batches with a time budget and is safe to re-run:
+ * a guest's users row is deleted last, so a guest interrupted halfway is simply
+ * picked up again next time. The response says `done: false` when work is left.
  */
 
+export const maxDuration = 60;
+
 const TTL_HOURS = Number(process.env.GUEST_TTL_HOURS || '24');
+const GUEST_BATCH = 50;
+const AUTH_DELETE_CONCURRENCY = 5;
+// cron-job.org gives up after 30s; stop starting new work well before that
+const TIME_BUDGET_MS = 20_000;
 
 // [table, column] rows keyed to a user that should be removed with the guest.
 const USER_REFERENCES: Array<[string, string]> = [
@@ -47,42 +57,75 @@ export async function POST(request: NextRequest) {
     return Response.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
+  const started = Date.now();
+  const outOfTime = () => Date.now() - started > TIME_BUDGET_MS;
+
   try {
     const db = getServiceClient();
     const threshold = new Date(Date.now() - TTL_HOURS * 60 * 60 * 1000).toISOString();
 
-    const { data: expiredGuests } = await db
-      .from('users')
-      .select('id')
-      .eq('is_guest', true)
-      .lt('created_at', threshold);
-
-    const guestIds = (expiredGuests ?? []).map((g: { id: string }) => g.id);
-    if (guestIds.length === 0) {
-      return Response.json({ success: true, purged: 0, ttl_hours: TTL_HOURS });
-    }
-
     let purged = 0;
-    for (const guestId of guestIds) {
-      try {
-        for (const [table, column] of USER_REFERENCES) {
-          const { error } = await db.from(table).delete().eq(column, guestId);
-          if (error) console.warn(`[purge-guests] ${table}.${column}:`, error.message);
-        }
+    let done = false;
+    const failedIds: string[] = [];
 
-        await db.from('users').delete().eq('id', guestId);
-
-        // Remove the anonymous auth user too (frees Supabase MAU).
-        const { error: authErr } = await db.auth.admin.deleteUser(guestId);
-        if (authErr) console.warn(`[purge-guests] auth delete ${guestId}:`, authErr.message);
-
-        purged++;
-      } catch (err) {
-        console.error(`[purge-guests] failed for ${guestId}:`, err);
+    while (!outOfTime()) {
+      let query = db
+        .from('users')
+        .select('id')
+        .eq('is_guest', true)
+        .lt('created_at', threshold)
+        .order('created_at', { ascending: true })
+        .limit(GUEST_BATCH);
+      if (failedIds.length) query = query.not('id', 'in', `(${failedIds.join(',')})`);
+      const { data: batch, error: selectErr } = await query;
+      if (selectErr) throw selectErr;
+      if (!batch?.length) {
+        done = true;
+        break;
       }
+      const guestIds = batch.map((g: { id: string }) => g.id);
+
+      // Content first: one delete per table for the whole batch
+      for (const [table, column] of USER_REFERENCES) {
+        const { error } = await db.from(table).delete().in(column, guestIds);
+        if (error) console.warn(`[purge-guests] ${table}.${column}:`, error.message);
+      }
+
+      // Then the anonymous auth users (frees Supabase MAU and revokes their sessions).
+      // "Not found" means an earlier run already removed it.
+      const authFailed = new Set<string>();
+      for (let i = 0; i < guestIds.length; i += AUTH_DELETE_CONCURRENCY) {
+        await Promise.all(guestIds.slice(i, i + AUTH_DELETE_CONCURRENCY).map(async (guestId) => {
+          const { error: authErr } = await db.auth.admin.deleteUser(guestId);
+          if (authErr && authErr.status !== 404) {
+            console.warn(`[purge-guests] auth delete ${guestId}:`, authErr.message);
+            authFailed.add(guestId);
+          }
+        }));
+      }
+
+      // The users row goes last, so an interrupted guest is found again next run
+      const doneIds = guestIds.filter((id) => !authFailed.has(id));
+      if (doneIds.length) {
+        const { error: delErr } = await db.from('users').delete().in('id', doneIds);
+        if (delErr) {
+          console.error('[purge-guests] users delete failed:', delErr.message);
+          failedIds.push(...doneIds);
+        } else {
+          purged += doneIds.length;
+        }
+      }
+      failedIds.push(...Array.from(authFailed));
     }
 
-    return Response.json({ success: true, purged, ttl_hours: TTL_HOURS });
+    return Response.json({
+      success: true,
+      done: done && failedIds.length === 0,
+      purged,
+      failed: failedIds.length,
+      ttl_hours: TTL_HOURS,
+      ms: Date.now() - started,
+    });
   } catch (error) {
     console.error('[cron/purge-guests] error:', error);
     return Response.json({ error: 'Internal error' }, { status: 500 });

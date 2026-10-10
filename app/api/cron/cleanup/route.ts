@@ -1,5 +1,27 @@
 import { NextRequest } from 'next/server';
 import { getServiceClient } from '@/src/lib/api-helpers';
+import { dissolveCutoffIso } from '@/src/lib/events';
+
+/**
+ * Monthly cleanup (cron-job.org, POST with x-webhook-secret):
+ *   1. delete events that dissolved (ended 24h+ ago), archiving them to event_history
+ *   2. expire stale announcements
+ *
+ * The app already hides dissolved events itself (src/lib/events.ts), so this only
+ * reclaims space. It works in batches with a time budget, and every step can be
+ * repeated safely: if a run stops partway (timeout, error) the next run carries on.
+ * The response says `done: false` when work is left over.
+ */
+
+export const maxDuration = 60;
+
+const EVENT_BATCH = 25;
+const MESSAGE_BATCH = 500;
+// cron-job.org gives up after 30s; stop starting new work well before that
+const TIME_BUDGET_MS = 20_000;
+
+type Db = ReturnType<typeof getServiceClient>;
+type Row = Record<string, unknown>;
 
 export async function POST(request: NextRequest) {
   const secret = request.headers.get('x-webhook-secret');
@@ -7,111 +29,164 @@ export async function POST(request: NextRequest) {
     return Response.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
+  const started = Date.now();
+  const outOfTime = () => Date.now() - started > TIME_BUDGET_MS;
+
   try {
     const db = getServiceClient();
-    const now = new Date();
-    const nowIso = now.toISOString();
-    const dissolveThreshold = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString();
+    const nowIso = new Date().toISOString();
 
-    // ── 1. Auto-delete dissolved events (ended > 24h ago) ────────────────────
-    const { data: dissolvedEvents } = await db
-      .from('events')
-      .select('id, name, description, start_datetime, end_datetime, location, max_members, image_url, creator_user_id, message_id')
-      .lt('end_datetime', dissolveThreshold);
-
+    // ── 1. Delete dissolved events, a batch at a time ─────────────────────────
     let deletedEvents = 0;
-    for (const evt of dissolvedEvents ?? []) {
-      const rec = evt as Record<string, unknown>;
-      const eventId = rec.id as number;
+    let done = false;
+    const failedIds: number[] = [];
+
+    while (!outOfTime()) {
+      let query = db.from('events')
+        .select('id, name, description, start_datetime, end_datetime, location, max_members, image_url, creator_user_id, message_id')
+        .lt('end_datetime', dissolveCutoffIso())
+        .order('id', { ascending: true })
+        .limit(EVENT_BATCH);
+      if (failedIds.length) query = query.not('id', 'in', `(${failedIds.join(',')})`);
+      const { data: batch, error: selectErr } = await query;
+      if (selectErr) throw selectErr;
+      if (!batch?.length) {
+        done = true;
+        break;
+      }
+
       try {
-        const { data: eventMsgs } = await db
-          .from('event_messages')
-          .select('id, attachments:event_message_attachments(file_key)')
-          .eq('event_id', eventId);
-        const msgIds = (eventMsgs || []).map((m: Record<string, unknown>) => m.id as number);
-
-        if (msgIds.length > 0) {
-          await db.from('event_message_reads').delete().in('event_message_id', msgIds);
-          await db.from('event_message_reactions').delete().in('event_message_id', msgIds);
-          await db.from('event_message_attachments').delete().in('event_message_id', msgIds);
-        }
-
-        // Remove attachment files from storage
-        const fileKeys: string[] = [];
-        for (const msg of eventMsgs ?? []) {
-          const atts = (msg as Record<string, unknown>).attachments as Array<{ file_key: string }> | null;
-          for (const att of atts ?? []) {
-            if (att.file_key) fileKeys.push(att.file_key);
-          }
-        }
-        if (fileKeys.length > 0) {
-          const byBucket: Record<string, string[]> = {};
-          for (const fk of fileKeys) {
-            const parts = fk.split('/');
-            const bucket = parts[0];
-            const path = parts.slice(1).join('/');
-            if (!byBucket[bucket]) byBucket[bucket] = [];
-            byBucket[bucket].push(path);
-          }
-          for (const [bucket, paths] of Object.entries(byBucket)) {
-            await db.storage.from(bucket).remove(paths);
-          }
-        }
-
-        await db.from('event_messages').delete().eq('event_id', eventId);
-        await db.from('event_members').delete().eq('event_id', eventId);
-        await db.from('typing_status').delete().eq('group_type', 'event').eq('group_id', String(eventId));
-
-        // Soft-delete main chat card
-        if (rec.message_id) {
-          await db.from('notifications').delete().eq('message_id', rec.message_id as number);
-          await db.from('messages').update({
-            is_deleted: true,
-            content: `"${rec.name}" event has been deleted`,
-            updated_at: nowIso,
-          }).eq('id', rec.message_id as number);
-        }
-
-        // Archive to event_history
-        const { data: creatorUser } = await db.from('users').select('name, room_number').eq('id', rec.creator_user_id as string).maybeSingle();
-        const { count: memberCount } = await db.from('event_members').select('*', { count: 'exact', head: true }).eq('event_id', eventId);
-        const { data: existing } = await db.from('event_history').select('id').eq('event_id', eventId).maybeSingle();
-        if (!existing) {
-          await db.from('event_history').insert({
-            event_id: eventId,
-            name: rec.name, description: rec.description, location: rec.location,
-            start_datetime: rec.start_datetime, end_datetime: rec.end_datetime,
-            max_members: rec.max_members, image_url: rec.image_url,
-            creator_user_id: rec.creator_user_id,
-            creator_name: (creatorUser as Record<string, unknown>)?.name || null,
-            creator_room: (creatorUser as Record<string, unknown>)?.room_number || null,
-            total_attendees: memberCount || 0,
-            is_deleted: false,
-            ended_at: nowIso,
-          });
-        }
-
-        await db.from('events').delete().eq('id', eventId);
-        deletedEvents++;
+        const finished = await dissolveEvents(db, batch as Row[], nowIso, outOfTime);
+        if (!finished) break; // out of time mid-batch; the next run picks it up
+        deletedEvents += batch.length;
       } catch (err) {
-        console.error(`[cron/cleanup] Failed to delete dissolved event ${eventId}:`, err);
+        console.error('[cron/cleanup] batch failed, skipping these events this run:', err);
+        failedIds.push(...batch.map((e: Row) => e.id as number));
       }
     }
 
     // ── 2. Expire stale announcements ─────────────────────────────────────────
     const { count: expiredAnnouncements } = await db
       .from('messages')
-      .update({ is_active_announcement: false })
+      .update({ is_active_announcement: false }, { count: 'exact' })
       .eq('is_active_announcement', true)
       .lt('announcement_expires_at', nowIso);
 
     return Response.json({
       success: true,
+      done: done && failedIds.length === 0,
       dissolved_events: deletedEvents,
+      failed_events: failedIds,
       expired_announcements: expiredAnnouncements ?? 0,
+      ms: Date.now() - started,
     });
   } catch (error) {
     console.error('[cron/cleanup] error:', error);
     return Response.json({ error: 'Internal error' }, { status: 500 });
   }
+}
+
+/**
+ * Archive and delete one batch of dissolved events. Each step is safe to repeat.
+ * Returns false if it ran out of time before finishing (nothing is lost).
+ */
+async function dissolveEvents(db: Db, events: Row[], nowIso: string, outOfTime: () => boolean) {
+  const eventIds = events.map((e) => e.id as number);
+
+  // Archive first, while members still exist (attendee list and count)
+  const { data: archived } = await db.from('event_history').select('event_id').in('event_id', eventIds);
+  const archivedIds = new Set((archived || []).map((h: Row) => h.event_id as number));
+  const toArchive = events.filter((e) => !archivedIds.has(e.id as number));
+
+  if (toArchive.length > 0) {
+    const archiveIds = toArchive.map((e) => e.id as number);
+    const creatorIds = Array.from(new Set(toArchive.map((e) => e.creator_user_id as string)));
+    const [{ data: members }, { data: creators }] = await Promise.all([
+      db.from('event_members').select('event_id, user_id').in('event_id', archiveIds),
+      db.from('users').select('id, name, room_number').in('id', creatorIds),
+    ]);
+    const membersByEvent: Record<number, string[]> = {};
+    for (const m of (members || []) as Array<{ event_id: number; user_id: string }>) {
+      (membersByEvent[m.event_id] ||= []).push(m.user_id);
+    }
+    const creatorMap: Record<string, Row> = {};
+    for (const u of (creators || []) as Row[]) creatorMap[u.id as string] = u;
+
+    const { data: histRows, error: histErr } = await db.from('event_history').insert(
+      toArchive.map((e) => ({
+        event_id: e.id,
+        name: e.name, description: e.description, location: e.location,
+        start_datetime: e.start_datetime, end_datetime: e.end_datetime,
+        max_members: e.max_members, image_url: e.image_url,
+        creator_user_id: e.creator_user_id,
+        creator_name: creatorMap[e.creator_user_id as string]?.name ?? null,
+        creator_room: creatorMap[e.creator_user_id as string]?.room_number ?? null,
+        total_attendees: membersByEvent[e.id as number]?.length || 0,
+        is_deleted: false,
+        ended_at: nowIso,
+      }))
+    ).select('id, event_id');
+    if (histErr) throw histErr;
+
+    const attendees = (histRows || []).flatMap((h: Row) =>
+      (membersByEvent[h.event_id as number] || []).map((userId) => ({ event_history_id: h.id, user_id: userId }))
+    );
+    if (attendees.length > 0) {
+      const { error: attErr } = await db.from('event_history_attendees').insert(attendees);
+      if (attErr) console.warn('[cron/cleanup] attendees not archived:', attErr.message);
+    }
+  }
+
+  // Event chat messages, their reads/reactions/attachments and stored files
+  for (;;) {
+    if (outOfTime()) return false;
+    const { data: msgs, error: msgErr } = await db.from('event_messages')
+      .select('id, attachments:event_message_attachments(file_key)')
+      .in('event_id', eventIds)
+      .limit(MESSAGE_BATCH);
+    if (msgErr) throw msgErr;
+    if (!msgs?.length) break;
+
+    const msgIds = msgs.map((m: Row) => m.id as number);
+    const byBucket: Record<string, string[]> = {};
+    for (const msg of msgs as Row[]) {
+      for (const att of (msg.attachments as Array<{ file_key: string }> | null) ?? []) {
+        if (!att.file_key) continue;
+        const [bucket, ...rest] = att.file_key.split('/');
+        (byBucket[bucket] ||= []).push(rest.join('/'));
+      }
+    }
+    for (const [bucket, paths] of Object.entries(byBucket)) {
+      await db.storage.from(bucket).remove(paths);
+    }
+
+    await Promise.all([
+      db.from('event_message_reads').delete().in('event_message_id', msgIds),
+      db.from('event_message_reactions').delete().in('event_message_id', msgIds),
+      db.from('event_message_attachments').delete().in('event_message_id', msgIds),
+    ]);
+    await db.from('event_messages').delete().in('id', msgIds);
+  }
+
+  await Promise.all([
+    db.from('event_members').delete().in('event_id', eventIds),
+    db.from('typing_status').delete().eq('group_type', 'event').in('group_id', eventIds.map(String)),
+  ]);
+
+  // Main-chat event cards: soft-delete, keeping the name for display
+  const cards = events.filter((e) => e.message_id);
+  if (cards.length > 0) {
+    await db.from('notifications').delete().in('message_id', cards.map((e) => e.message_id as number));
+    await Promise.all(cards.map((e) =>
+      db.from('messages').update({
+        is_deleted: true,
+        content: `"${e.name}" event has been deleted`,
+        updated_at: nowIso,
+      }).eq('id', e.message_id as number)
+    ));
+  }
+
+  const { error: delErr } = await db.from('events').delete().in('id', eventIds);
+  if (delErr) throw delErr;
+  return true;
 }
