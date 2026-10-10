@@ -41,6 +41,33 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
   const isAdmin = caller?.is_admin === 1 || caller?.is_admin === true;
   if (evt.creator_user_id !== userId && !isAdmin) return error('Only the creator can delete this event', 403);
 
+  // Archive to history first, while the member list still exists.
+  // Skipped if a previous attempt already archived this event.
+  const { data: members } = await db.from('event_members').select('user_id').eq('event_id', eventId);
+  const { data: existingHist } = await db.from('event_history').select('id').eq('event_id', eventId).limit(1);
+  if (!existingHist?.length) {
+    const { data: creatorUser } = await db.from('users').select('name, room_number').eq('id', evt.creator_user_id).maybeSingle();
+    const { data: histRecord, error: histError } = await db.from('event_history').insert({
+      event_id: eventId, name: evt.name, description: evt.description, location: evt.location,
+      start_datetime: evt.start_datetime, end_datetime: evt.end_datetime, max_members: evt.max_members,
+      image_url: evt.image_url, creator_user_id: evt.creator_user_id,
+      creator_name: (creatorUser as Record<string, unknown>)?.name,
+      creator_room: (creatorUser as Record<string, unknown>)?.room_number,
+      total_attendees: members?.length ?? 0, is_deleted: true, ended_at: new Date().toISOString(),
+    }).select('id').single();
+    if (histError || !histRecord) return error('Failed to archive event', 500);
+
+    if (members && members.length > 0) {
+      const { error: attendeesError } = await db.from('event_history_attendees').insert(
+        members.map((m: { user_id: string }) => ({ event_history_id: (histRecord as { id: number }).id, user_id: m.user_id }))
+      );
+      if (attendeesError) {
+        await db.from('event_history').delete().eq('id', (histRecord as { id: number }).id);
+        return error('Failed to archive event', 500);
+      }
+    }
+  }
+
   // Fetch all event message IDs for cascade delete
   const { data: eventMsgs } = await db.from('event_messages').select('id, attachments:event_message_attachments(file_key)').eq('event_id', eventId);
   const msgIds = (eventMsgs || []).map((m: Record<string, unknown>) => m.id as number);
@@ -92,30 +119,7 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
     await db.from('messages').update({ is_deleted: true, content: `"${evt.name}" event has been deleted`, updated_at: new Date().toISOString() }).eq('id', evt.message_id);
   }
 
-  // 7. Archive to history
-  const { count: memberCount } = await db.from('event_members').select('*', { count: 'exact', head: true }).eq('event_id', eventId);
-  const { data: members } = await db.from('event_members').select('user_id').eq('event_id', eventId);
-  const { data: creatorUser } = await db.from('users').select('name, room_number').eq('id', evt.creator_user_id).maybeSingle();
-
-  const { data: histRecord } = await db.from('event_history').insert({
-    event_id: eventId, name: evt.name, description: evt.description, location: evt.location,
-    start_datetime: evt.start_datetime, end_datetime: evt.end_datetime, max_members: evt.max_members,
-    image_url: evt.image_url, creator_user_id: evt.creator_user_id,
-    creator_name: (creatorUser as Record<string, unknown>)?.name,
-    creator_room: (creatorUser as Record<string, unknown>)?.room_number,
-    total_attendees: memberCount || 0, is_deleted: true, ended_at: new Date().toISOString(),
-  }).select().single();
-
-  if (histRecord && members) {
-    for (const m of members) {
-      await db.from('event_history_attendees').insert({
-        event_history_id: (histRecord as { id: number }).id,
-        user_id: (m as { user_id: string }).user_id,
-      });
-    }
-  }
-
-  // 8. Delete the event itself
+  // 7. Delete the event itself
   await db.from('events').delete().eq('id', eventId);
 
   return json({ success: true });
