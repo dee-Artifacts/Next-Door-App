@@ -68,7 +68,10 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
+  // Pages only. API routes authenticate themselves (authenticate() refreshes the
+  // session cookie too, or the cron secret), so running getUser() here as well
+  // doubled the Auth round trips on every API call.
   matcher: [
-    '/((?!_next/static|_next/image|favicon\\.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
+    '/((?!api/|_next/static|_next/image|favicon\\.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
   ],
 }
