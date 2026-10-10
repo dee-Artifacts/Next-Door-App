@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { usePolling } from "@/src/hooks/usePolling";
+import { useChatSync, mergeNewMessages } from "@/src/hooks/useChatSync";
 import { useAuth } from "@/src/lib/auth-hook";
 import ChatHeader from "@/src/components/ChatHeader";
 import EventUserList from "@/src/components/EventUserList";
@@ -157,6 +158,12 @@ export default function EventChatView({ eventId, eventName, onBack }: EventChatV
     fetchMembers();
     fetchEventDetails();
   }, 30_000);
+  // While idle: one check for new messages every 5 minutes instead of the polls above
+  useChatSync({
+    chat: `event:${eventId}`,
+    messages,
+    onNewMessages: (incoming) => setMessages((prev) => mergeNewMessages(prev, incoming)),
+  });
 
   // Remove optimistic messages when their real counterparts arrive
   useEffect(() => {

@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { usePolling } from "@/src/hooks/usePolling";
+import { useChatSync, mergeNewMessages } from "@/src/hooks/useChatSync";
 import { useAuth } from "@/src/lib/auth-hook";
 import { Package, CheckCircle, X } from "lucide-react";
 import ListingMessageList, { ListingMessageListRef } from "./ListingMessageList";
@@ -124,6 +125,12 @@ export default function ListingChatView({ listingId, onBack }: ListingChatViewPr
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [listingId]);
   usePolling(fetchMembers, 30_000);
+  // While idle: one check for new messages every 5 minutes instead of the polls above
+  useChatSync({
+    chat: `listing:${listingId}`,
+    messages,
+    onNewMessages: (incoming) => setMessages((prev) => mergeNewMessages(prev, incoming)),
+  });
 
   // Remove optimistic messages when confirmed
   useEffect(() => {

@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import type { Message, SystemMessage } from "@/src/lib/types";
 import type { TypingUser } from "@/src/hooks/useTypingStatus";
+import { mergeNewMessages } from "@/src/hooks/useChatSync";
 
 type MessageOrSystem = Message | SystemMessage;
 
@@ -61,8 +62,14 @@ export function useMessages(groupId?: string | null, { onTypingUsers }: UseMessa
     fetchMessages();
   }, [fetchMessages]);
 
+  // New messages from the idle check (/api/sync); the next full fetch reconciles everything.
+  const appendMessages = useCallback((incoming: MessageOrSystem[]) => {
+    setMessages((prev) => mergeNewMessages(prev, incoming));
+  }, []);
+
   return {
     messages,
+    appendMessages,
     lastReadMessageId,
     isLoading,
     hasInitiallyLoaded,

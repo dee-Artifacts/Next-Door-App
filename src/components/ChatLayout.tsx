@@ -13,7 +13,7 @@ import TypingIndicator from "@/src/components/TypingIndicator";
 
 import { useMessages } from "@/src/hooks/useMessages";
 import { useUsers } from "@/src/hooks/useUsers";
-import { useChatCounts } from "@/src/hooks/useChatCounts";
+import { useChatSync } from "@/src/hooks/useChatSync";
 import { useTypingStatus } from "@/src/hooks/useTypingStatus";
 import { usePolling } from "@/src/hooks/usePolling";
 import { useToast } from "@/src/context/ToastContext";
@@ -84,7 +84,7 @@ export default function ChatLayout({ groupId, eventName, eventId, onBackToMain, 
   const [showOnboarding, setShowOnboarding] = useState(false);
   
   const { typingUsers, updateTypingUsers, sendTypingStatus } = useTypingStatus({ groupType: "main" });
-  const { messages: rawMessages, lastReadMessageId, isLoading, hasInitiallyLoaded, refetch } = useMessages(groupId || null, { onTypingUsers: updateTypingUsers });
+  const { messages: rawMessages, appendMessages, lastReadMessageId, isLoading, hasInitiallyLoaded, refetch } = useMessages(groupId || null, { onTypingUsers: updateTypingUsers });
   
   // Ensure messages is always an array to prevent .map() errors
   const messages = Array.isArray(rawMessages) ? rawMessages : [];
@@ -103,7 +103,13 @@ export default function ChatLayout({ groupId, eventName, eventId, onBackToMain, 
     );
   }, [messages]);
   const { users } = useUsers();
-  const { unreadCount, notificationCount, refetch: refetchCounts } = useChatCounts();
+  // Header counts every 30s; while idle, one combined check (counts + new messages) every 5 min
+  const { unreadCount, notificationCount, refetchCounts } = useChatSync({
+    chat: groupId === "main" || !groupId ? "main" : undefined,
+    messages,
+    onNewMessages: appendMessages,
+    withCounts: true,
+  });
   const { showToast } = useToast();
 
   useEffect(() => {

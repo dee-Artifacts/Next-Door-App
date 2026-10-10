@@ -1,14 +1,20 @@
+import { NextRequest } from 'next/server';
 import { authenticate, getServiceClient, json, error } from '@/src/lib/api-helpers';
 import { getMainUnreadCount } from '@/src/lib/unread';
+import {
+  loadMainMessages, loadEventMessages, loadListingMessages, checkEventAccess, checkListingAccess,
+} from '@/src/lib/chat-messages';
 
 /**
- * One request for everything the chat header needs, so the badge counts are
- * polled once instead of through three separate routes.
+ * One request for everything a chat screen needs to stay current, so the
+ * client never fans out into several polls:
+ *   - header counts: main-chat unread, unread mentions/replies, live admin reminders
+ *   - with ?chat=main|event:<id>|listing:<id>&after=<last message id>:
+ *     the messages in that chat newer than `after` (used by the 5-minute idle check)
  *
- * Returns the main-chat unread count, unread mentions/replies and live admin
- * reminders. A blocked account gets 403 so the client can sign it out.
+ * A blocked account gets 403 so the client can sign it out.
  */
-export async function GET() {
+export async function GET(request: NextRequest) {
   const userId = await authenticate();
   if (!userId) return error('Unauthorized', 401);
   const db = getServiceClient();
@@ -18,7 +24,10 @@ export async function GET() {
     return error('Your account has been blocked', 403);
   }
 
-  const [unreadCount, { count: mentionCount }, { count: reminderCount }] = await Promise.all([
+  const chat = request.nextUrl.searchParams.get('chat');
+  const afterId = Number(request.nextUrl.searchParams.get('after')) || 0;
+
+  const [unreadCount, { count: mentionCount }, { count: reminderCount }, messages] = await Promise.all([
     getMainUnreadCount(db, userId),
     db.from('notifications')
       .select('*', { count: 'exact', head: true })
@@ -27,11 +36,37 @@ export async function GET() {
     db.from('reminders')
       .select('*', { count: 'exact', head: true })
       .gt('expires_at', new Date().toISOString()),
+    chat && afterId ? loadNewMessages(db, userId, chat, afterId) : Promise.resolve(undefined),
   ]);
 
   return json({
     unread_count: unreadCount,
     mention_count: mentionCount || 0,
     reminder_count: reminderCount || 0,
+    ...(messages !== undefined && { messages }),
   });
+}
+
+/** New messages in one chat, or [] if the caller can no longer see it. */
+async function loadNewMessages(
+  db: ReturnType<typeof getServiceClient>, userId: string, chat: string, afterId: number
+): Promise<unknown[]> {
+  if (chat === 'main') {
+    const { messages } = await loadMainMessages(db, userId, 'main', { afterId });
+    return messages;
+  }
+
+  const [kind, rawId] = chat.split(':');
+  const id = parseInt(rawId);
+  if (!id) return [];
+
+  if (kind === 'event') {
+    if (await checkEventAccess(db, userId, id)) return [];
+    return loadEventMessages(db, id, { afterId });
+  }
+  if (kind === 'listing') {
+    if (await checkListingAccess(db, userId, id)) return [];
+    return loadListingMessages(db, id, { afterId });
+  }
+  return [];
 }
