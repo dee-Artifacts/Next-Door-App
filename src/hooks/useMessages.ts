@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import type { Message, SystemMessage } from "@/src/lib/types";
 import type { TypingUser } from "@/src/hooks/useTypingStatus";
 import { mergeNewMessages } from "@/src/hooks/useChatSync";
+import { stopIfDenied } from "@/src/lib/session-guard";
 
 type MessageOrSystem = Message | SystemMessage;
 
@@ -24,6 +25,8 @@ export function useMessages(groupId?: string | null, { onTypingUsers }: UseMessa
       const url = groupId ? `/api/messages?group_id=${encodeURIComponent(groupId)}` : "/api/messages";
       const response = await fetch(url, { credentials: 'include' });
       if (!response.ok) {
+        const stop = await stopIfDenied(response);
+        if (stop) return stop;
         console.error(`[useMessages] Response not OK: ${response.status} ${response.statusText}`);
         throw new Error("Failed to fetch messages");
       }

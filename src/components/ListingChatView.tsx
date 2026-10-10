@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { usePolling } from "@/src/hooks/usePolling";
 import { useChatSync, mergeNewMessages } from "@/src/hooks/useChatSync";
+import { stopIfDenied } from "@/src/lib/session-guard";
 import { useAuth } from "@/src/lib/auth-hook";
 import { Package, CheckCircle, X } from "lucide-react";
 import ListingMessageList, { ListingMessageListRef } from "./ListingMessageList";
@@ -93,6 +94,8 @@ export default function ListingChatView({ listingId, onBack }: ListingChatViewPr
         const data = Array.isArray(body) ? body : body.messages;
         setMessages(Array.isArray(data) ? data : []);
         updateTypingUsers(body.typing_users);
+      } else {
+        return stopIfDenied(response);
       }
     } catch (error) {
       console.error("Error fetching messages:", error);
@@ -115,6 +118,8 @@ export default function ListingChatView({ listingId, onBack }: ListingChatViewPr
         const data = await response.json();
         const newMembers: ListingMember[] = Array.isArray(data.members) ? data.members : [];
         setMembers(newMembers);
+      } else {
+        return stopIfDenied(response);
       }
     } catch (error) {
       console.error("Error fetching members:", error);

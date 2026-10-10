@@ -1,6 +1,7 @@
 'use client';
 import { useState, useEffect } from "react";
 import { usePolling } from "@/src/hooks/usePolling";
+import { stopIfDenied } from "@/src/lib/session-guard";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/src/lib/auth-hook";
 import { ArrowLeft, Plus, ChevronLeft, ChevronRight, MessageCircle, Users, Hand, Trash2, X, Check, MessageSquarePlus, LogOut, CheckCircle, MoreVertical, History, HelpCircle } from "lucide-react";
@@ -593,6 +594,9 @@ export default function MarketPage() {
         if (response.ok) {
           const data = await response.json();
           counts[listing.id] = data.count || 0;
+        } else if (response.status === 401) {
+          // Session gone: stop here (one item's 403/404 shouldn't stop the others)
+          return stopIfDenied(response);
         }
       } catch (error) {
         console.error(`Error fetching unread count for listing ${listing.id}:`, error);

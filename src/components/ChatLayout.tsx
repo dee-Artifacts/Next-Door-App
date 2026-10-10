@@ -1,7 +1,6 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { useAuth } from "@/src/lib/auth-hook";
 import { useRouter } from "next/navigation";
-import { createClient } from "@/src/lib/supabase/client";
 import MessageList from "@/src/components/MessageList";
 import MessageInput from "@/src/components/MessageInput";
 import UserList from "@/src/components/UserList";
@@ -16,6 +15,7 @@ import { useUsers } from "@/src/hooks/useUsers";
 import { useChatSync } from "@/src/hooks/useChatSync";
 import { useTypingStatus } from "@/src/hooks/useTypingStatus";
 import { usePolling } from "@/src/hooks/usePolling";
+import { handleBlockedAccount, stopIfDenied } from "@/src/lib/session-guard";
 import { useToast } from "@/src/context/ToastContext";
 import NotificationPanel from "@/src/components/NotificationPanel";
 import SearchPanel from "@/src/components/SearchPanel";
@@ -153,6 +153,8 @@ export default function ChatLayout({ groupId, eventName, eventId, onBackToMain, 
       if (response.ok) {
         const data = await response.json();
         setPinnedMessages(data);
+      } else {
+        return stopIfDenied(response);
       }
     } catch (error) {
       console.error("Failed to fetch pinned messages:", error);
@@ -163,31 +165,21 @@ export default function ChatLayout({ groupId, eventName, eventId, onBackToMain, 
     fetchPinnedMessages();
   }, []);
 
-  // ── Block detection ──────────────────────────────────────────────────────
-  // The heartbeat reports is_active; a blocked account is signed out and sent to /blocked.
-  const blockCheckRef = useRef(false);
-  const handleBlocked = async () => {
-    if (blockCheckRef.current) return;
-    blockCheckRef.current = true;
-    await createClient().auth.signOut();
-    router.replace('/blocked');
-  };
-
   // Poll for new messages (and who is typing) every 5 seconds
   usePolling(refetch, 5000);
 
   // Pinned messages change rarely; they are also refetched after pin/unpin and sending
   usePolling(fetchPinnedMessages, 60_000);
 
-  // Send heartbeat every 60 seconds to update online status (online = seen in the last 2 min)
+  // Send heartbeat every 60 seconds to update online status (online = seen in the last 2 min).
+  // It also reports is_active: a blocked account is signed out and sent to /blocked.
   const sendHeartbeat = async () => {
     try {
       const res = await fetch("/api/users/heartbeat", { method: "POST", credentials: 'include' });
-      if (res.ok) {
-        const data = await res.json();
-        if ((data.is_active === 0 || data.is_active === false) && !data.is_deleted) {
-          await handleBlocked();
-        }
+      if (!res.ok) return stopIfDenied(res);
+      const data = await res.json();
+      if ((data.is_active === 0 || data.is_active === false) && !data.is_deleted) {
+        await handleBlockedAccount();
       }
     } catch (error) {
       console.error("Heartbeat error:", error);

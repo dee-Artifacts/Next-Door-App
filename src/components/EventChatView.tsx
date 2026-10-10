@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { usePolling } from "@/src/hooks/usePolling";
 import { useChatSync, mergeNewMessages } from "@/src/hooks/useChatSync";
+import { stopIfDenied } from "@/src/lib/session-guard";
 import { useAuth } from "@/src/lib/auth-hook";
 import ChatHeader from "@/src/components/ChatHeader";
 import EventUserList from "@/src/components/EventUserList";
@@ -154,10 +155,7 @@ export default function EventChatView({ eventId, eventName, onBack }: EventChatV
 
   // Poll messages (and who is typing) every 5 seconds; details and members change rarely
   usePolling(() => fetchMessages(), 5000);
-  usePolling(() => {
-    fetchMembers();
-    fetchEventDetails();
-  }, 30_000);
+  usePolling(() => Promise.all([fetchMembers(), fetchEventDetails()]), 30_000);
   // While idle: one check for new messages every 5 minutes instead of the polls above
   useChatSync({
     chat: `event:${eventId}`,
@@ -227,6 +225,7 @@ export default function EventChatView({ eventId, eventName, onBack }: EventChatV
         }
       } else {
         setMessages([]);
+        return stopIfDenied(response);
       }
     } catch (error) {
       console.error("Error fetching event messages:", error);
@@ -300,9 +299,8 @@ export default function EventChatView({ eventId, eventName, onBack }: EventChatV
           onBack();
           return;
         }
-      } else if (response.status === 401) {
-        console.error("Unauthorized - redirecting to main group");
-        onBack();
+      } else {
+        return stopIfDenied(response);
       }
     } catch (error) {
       console.error("Error fetching event details:", error);
@@ -325,9 +323,8 @@ export default function EventChatView({ eventId, eventName, onBack }: EventChatV
         } else {
           setMembers(data.members);
         }
-      } else if (response.status === 401) {
-        console.error("Unauthorized - redirecting to main group");
-        onBack();
+      } else {
+        return stopIfDenied(response);
       }
     } catch (error) {
       console.error("Error fetching event members:", error);

@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { getActivityState, subscribeActivity, type ActivityState } from "@/src/lib/activity";
+import { isSessionEnded, STOP_POLLING } from "@/src/lib/session-guard";
 
 type PollMode = Exclude<ActivityState, 'hidden'>;
 type PollFn = (mode: PollMode) => unknown;
@@ -18,6 +19,8 @@ interface UsePollingOptions {
  *   - never runs while the tab is hidden
  *   - runs once immediately when the user comes back (input, focus, tab shown)
  *   - never overlaps itself: the next tick is scheduled after the previous one ends
+ *   - stops for good when the callback returns STOP_POLLING (or an array containing
+ *     it, for Promise.all), or once the session has ended (see session-guard)
  *
  * The first fetch on mount stays with the caller; this hook only handles the repeats.
  * `callback` may change every render; the latest one is always used.
@@ -38,15 +41,23 @@ export function usePolling(
     let timer: ReturnType<typeof setTimeout> | null = null;
     let inFlight = false;
     let disposed = false;
+    let stopped = false;
 
     const intervalFor = (state: ActivityState) =>
       state === 'active' ? activeIntervalMs : state === 'idle' ? idleIntervalMs : null;
 
     const run = async (mode: PollMode) => {
-      if (inFlight || disposed) return;
+      if (inFlight || disposed || stopped) return;
+      if (isSessionEnded()) {
+        stopped = true;
+        return;
+      }
       inFlight = true;
       try {
-        await callbackRef.current(mode);
+        const result = await callbackRef.current(mode);
+        if (result === STOP_POLLING || (Array.isArray(result) && result.includes(STOP_POLLING))) {
+          stopped = true;
+        }
       } catch (err) {
         console.error('[usePolling] poll failed:', err);
       } finally {
@@ -57,7 +68,7 @@ export function usePolling(
     const schedule = () => {
       if (timer) clearTimeout(timer);
       timer = null;
-      if (disposed) return;
+      if (disposed || stopped) return;
       const ms = intervalFor(getActivityState());
       if (ms == null) return;
       timer = setTimeout(async () => {

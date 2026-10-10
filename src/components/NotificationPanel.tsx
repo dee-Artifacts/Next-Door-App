@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { usePolling } from "@/src/hooks/usePolling";
+import { stopIfDenied } from "@/src/lib/session-guard";
 import { Bell, MessageCircle, AlertTriangle, Eye, Trash2, Clock } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { NotificationsSkeleton } from "@/src/components/Skeletons";
@@ -74,6 +75,10 @@ export default function NotificationPanel({
         fetch("/api/admin-reminders", { credentials: 'include' }),
         fetch("/api/users/me", { credentials: 'include' }),
       ]);
+
+      if (notificationsRes.status === 401 || notificationsRes.status === 403) {
+        return stopIfDenied(notificationsRes);
+      }
 
       if (notificationsRes.ok) {
         const notificationsData = await notificationsRes.json();

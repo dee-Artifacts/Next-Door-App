@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { usePolling } from "@/src/hooks/usePolling";
+import { stopIfDenied } from "@/src/lib/session-guard";
 
 export const IDLE_SYNC_INTERVAL_MS = 5 * 60 * 1000;
 
@@ -70,7 +71,7 @@ export function useChatSync<M extends MessageLike>({
       }
       const query = params.toString();
       const response = await fetch(`/api/sync${query ? `?${query}` : ""}`, { credentials: "include" });
-      if (!response.ok) return;
+      if (!response.ok) return stopIfDenied(response);
       const data = await response.json();
       setUnreadCount(data.unread_count || 0);
       setMentionCount(data.mention_count || 0);

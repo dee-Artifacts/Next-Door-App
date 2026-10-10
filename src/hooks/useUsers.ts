@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { usePolling } from "@/src/hooks/usePolling";
+import { stopIfDenied } from "@/src/lib/session-guard";
 
 export interface User {
   id: string;
@@ -22,7 +23,11 @@ export function useUsers() {
   const fetchUsers = async () => {
     try {
       const response = await fetch("/api/users", { credentials: 'include' });
-      if (!response.ok) throw new Error("Failed to fetch users");
+      if (!response.ok) {
+        const stop = await stopIfDenied(response);
+        if (stop) return stop;
+        throw new Error("Failed to fetch users");
+      }
       const data = await response.json();
       setUsers(data);
     } catch (error) {
