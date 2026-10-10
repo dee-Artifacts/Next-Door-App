@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { usePolling } from "@/src/hooks/usePolling";
 
-interface User {
+export interface User {
   id: string;
   email: string;
   name: string | null;
@@ -36,8 +36,8 @@ export function useUsers() {
     fetchUsers();
   }, []);
 
-  // Poll for user status updates every 10 seconds
-  usePolling(fetchUsers, 10000);
+  // Poll for user status updates every 30 seconds
+  usePolling(fetchUsers, 30_000);
 
   return {
     users,

@@ -13,8 +13,7 @@ import TypingIndicator from "@/src/components/TypingIndicator";
 
 import { useMessages } from "@/src/hooks/useMessages";
 import { useUsers } from "@/src/hooks/useUsers";
-import { useUnreadCount } from "@/src/hooks/useUnreadCount";
-import { useNotifications } from "@/src/hooks/useNotifications";
+import { useChatCounts } from "@/src/hooks/useChatCounts";
 import { useTypingStatus } from "@/src/hooks/useTypingStatus";
 import { usePolling } from "@/src/hooks/usePolling";
 import { useToast } from "@/src/context/ToastContext";
@@ -84,7 +83,8 @@ export default function ChatLayout({ groupId, eventName, eventId, onBackToMain, 
   const [optimisticMessages, setOptimisticMessages] = useState<OptimisticMessage[]>([]);
   const [showOnboarding, setShowOnboarding] = useState(false);
   
-  const { messages: rawMessages, lastReadMessageId, isLoading, hasInitiallyLoaded, refetch } = useMessages(groupId || null);
+  const { typingUsers, updateTypingUsers, sendTypingStatus } = useTypingStatus({ groupType: "main" });
+  const { messages: rawMessages, lastReadMessageId, isLoading, hasInitiallyLoaded, refetch } = useMessages(groupId || null, { onTypingUsers: updateTypingUsers });
   
   // Ensure messages is always an array to prevent .map() errors
   const messages = Array.isArray(rawMessages) ? rawMessages : [];
@@ -103,9 +103,7 @@ export default function ChatLayout({ groupId, eventName, eventId, onBackToMain, 
     );
   }, [messages]);
   const { users } = useUsers();
-  const { unreadCount, refetch: refetchUnreadCount } = useUnreadCount();
-  const { unreadCount: notificationCount, refetch: refetchNotifications } = useNotifications(unreadCount, groupId);
-  const { typingUsers, sendTypingStatus } = useTypingStatus({ groupType: "main" });
+  const { unreadCount, notificationCount, refetch: refetchCounts } = useChatCounts();
   const { showToast } = useToast();
 
   useEffect(() => {
@@ -159,9 +157,8 @@ export default function ChatLayout({ groupId, eventName, eventId, onBackToMain, 
     fetchPinnedMessages();
   }, []);
 
-  // ── Real-time block detection ────────────────────────────────────────────
-  // Polls every 30s AND subscribes to realtime changes on the users row.
-  // Either mechanism triggers an immediate sign-out + redirect to /blocked.
+  // ── Block detection ──────────────────────────────────────────────────────
+  // The heartbeat reports is_active; a blocked account is signed out and sent to /blocked.
   const blockCheckRef = useRef(false);
   const handleBlocked = async () => {
     if (blockCheckRef.current) return;
@@ -170,71 +167,31 @@ export default function ChatLayout({ groupId, eventName, eventId, onBackToMain, 
     router.replace('/blocked');
   };
 
-  // Polling - fires every 30 seconds
-  const checkActive = async () => {
+  // Poll for new messages (and who is typing) every 5 seconds
+  usePolling(refetch, 5000);
+
+  // Pinned messages change rarely; they are also refetched after pin/unpin and sending
+  usePolling(fetchPinnedMessages, 60_000);
+
+  // Send heartbeat every 60 seconds to update online status (online = seen in the last 2 min)
+  const sendHeartbeat = async () => {
     try {
-      const res = await fetch('/api/profile', { credentials: 'include' });
-      if (res.status === 401 || res.status === 403) {
-        await handleBlocked();
-        return;
-      }
+      const res = await fetch("/api/users/heartbeat", { method: "POST", credentials: 'include' });
       if (res.ok) {
         const data = await res.json();
-        if (data.is_active === 0 || data.is_active === false) {
+        if ((data.is_active === 0 || data.is_active === false) && !data.is_deleted) {
           await handleBlocked();
         }
       }
-    } catch { /* network error - don't redirect */ }
-  };
-  usePolling(checkActive, 30_000, { enabled: !!user?.id });
-
-  useEffect(() => {
-    if (!user?.id) return;
-    blockCheckRef.current = false;
-
-    const supabase = createClient();
-
-    // Realtime - instant detection when admin changes is_active
-    const channel = supabase
-      .channel(`user-status-${user.id}`)
-      .on(
-        'postgres_changes',
-        { event: 'UPDATE', schema: 'public', table: 'users', filter: `id=eq.${user.id}` },
-        (payload) => {
-          const updated = payload.new as { is_active?: number | boolean };
-          if (updated.is_active === 0 || updated.is_active === false) {
-            handleBlocked();
-          }
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.id, router]);
-
-  // Poll for new messages every 3 seconds
-  usePolling(() => {
-    refetch();
-    refetchUnreadCount();
-    refetchNotifications();
-    fetchPinnedMessages();
-  }, 3000);
-
-  // Send heartbeat every 30 seconds to update online status
-  const sendHeartbeat = async () => {
-    try {
-      await fetch("/api/users/heartbeat", { method: "POST", credentials: 'include' });
     } catch (error) {
       console.error("Heartbeat error:", error);
     }
   };
   useEffect(() => {
     sendHeartbeat();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  usePolling(sendHeartbeat, 30000);
+  usePolling(sendHeartbeat, 60_000);
 
   // Close reaction bar on scroll
   useEffect(() => {
@@ -309,11 +266,11 @@ export default function ChatLayout({ groupId, eventName, eventId, onBackToMain, 
   const handleNotificationMessageClick = (messageId: number) => {
     setActivePanel(null);
     handleScrollToMessage(messageId);
-    refetchNotifications();
+    refetchCounts();
   };
 
   const handleUnreadMessagesClick = () => {
-    refetchUnreadCount();
+    refetchCounts();
     if (messages.length === 0) return;
 
     // Find first unread message: one after the last read, or first message from another user
@@ -708,7 +665,7 @@ export default function ChatLayout({ groupId, eventName, eventId, onBackToMain, 
             onSetActiveMessage={setActiveMessageId}
             unreadCount={unreadCount}
             lastReadMessageId={lastReadMessageId}
-            onUnreadBadgeDismissed={refetchUnreadCount}
+            onUnreadBadgeDismissed={refetchCounts}
             onImagePreview={handleImagePreview}
             onJoinEvent={handleJoinEvent}
             onGoToEventChat={onGoToEventChat}
@@ -724,6 +681,7 @@ export default function ChatLayout({ groupId, eventName, eventId, onBackToMain, 
             onCancelReply={handleCancelReply}
             groupId={groupId}
             onTyping={sendTypingStatus}
+            users={users}
           />
         </div>
         

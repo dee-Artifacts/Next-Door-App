@@ -65,7 +65,7 @@ export default function ListingChatView({ listingId, onBack }: ListingChatViewPr
   const [selectedHelpers, setSelectedHelpers] = useState<string[]>([]);
 
   const messageListRef = useRef<ListingMessageListRef>(null);
-  const { typingUsers, sendTypingStatus } = useTypingStatus({ groupType: "listing", groupId: String(listingId) });
+  const { typingUsers, updateTypingUsers, sendTypingStatus } = useTypingStatus({ groupType: "listing", groupId: String(listingId) });
 
   // Fetch listing details
   useEffect(() => {
@@ -86,10 +86,12 @@ export default function ListingChatView({ listingId, onBack }: ListingChatViewPr
   // Fetch messages
   const fetchMessages = async () => {
     try {
-      const response = await fetch(`/api/listings/${listingId}/messages`, { credentials: 'include' });
+      const response = await fetch(`/api/listings/${listingId}/messages?with_typing=1`, { credentials: 'include' });
       if (response.ok) {
-        const data = await response.json();
+        const body = await response.json();
+        const data = Array.isArray(body) ? body : body.messages;
         setMessages(Array.isArray(data) ? data : []);
+        updateTypingUsers(body.typing_users);
       }
     } catch (error) {
       console.error("Error fetching messages:", error);
@@ -101,7 +103,8 @@ export default function ListingChatView({ listingId, onBack }: ListingChatViewPr
     fetchMessages();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [listingId]);
-  usePolling(fetchMessages, 2000);
+  // Poll messages (and who is typing) every 5 seconds
+  usePolling(fetchMessages, 5000);
 
   // Fetch members
   const fetchMembers = async () => {
@@ -120,7 +123,7 @@ export default function ListingChatView({ listingId, onBack }: ListingChatViewPr
     fetchMembers();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [listingId]);
-  usePolling(fetchMembers, 5000);
+  usePolling(fetchMembers, 30_000);
 
   // Remove optimistic messages when confirmed
   useEffect(() => {

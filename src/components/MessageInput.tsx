@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import { Send, Paperclip, X, Smile } from "lucide-react";
 import EmojiPicker from "@/src/components/EmojiPicker";
 import MentionAutocomplete from "@/src/components/MentionAutocomplete";
-import { useUsers } from "@/src/hooks/useUsers";
+import type { User } from "@/src/hooks/useUsers";
 
 interface MessageInputProps {
   onOptimisticMessage: (content: string, attachments: Array<{ file: File; preview?: string }>, replyToMessageId?: number, hashtagId?: number) => void;
@@ -14,6 +14,8 @@ interface MessageInputProps {
   onCancelReply: () => void;
   groupId?: string;
   onTyping?: () => void;
+  /** Everyone in the chat, for @mention autocomplete (ChatLayout already polls this) */
+  users: User[];
 }
 
 export default function MessageInput({
@@ -21,6 +23,7 @@ export default function MessageInput({
   replyToMessage,
   onCancelReply,
   onTyping,
+  users,
 }: MessageInputProps) {
   const [message, setMessage] = useState("");
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
@@ -32,7 +35,6 @@ export default function MessageInput({
   const [mentionStartPos, setMentionStartPos] = useState<number>(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const { users } = useUsers();
 
   useEffect(() => {
     if (textareaRef.current) {

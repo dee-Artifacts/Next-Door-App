@@ -1,5 +1,6 @@
 import { NextRequest } from 'next/server';
 import { authenticate, getServiceClient, json, error } from '@/src/lib/api-helpers';
+import { getTypingUsers } from '@/src/lib/typing';
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ groupType: string }> }) {
   const userId = await authenticate();
@@ -8,29 +9,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const db = getServiceClient();
 
   const groupId = request.nextUrl.searchParams.get('group_id') || null;
-  const cutoff = new Date(Date.now() - 5000).toISOString(); // 5 seconds ago
-
-  let query = db
-    .from('typing_status')
-    .select('user_id, users!typing_status_user_id_fkey(name, avatar_url, room_number)')
-    .eq('group_type', groupType)
-    .neq('user_id', userId)
-    .gt('last_typed_at', cutoff);
-
-  if (groupId) {
-    query = query.eq('group_id', groupId);
-  } else {
-    query = query.is('group_id', null);
-  }
-
-  const { data } = await query;
-
-  const typingUsers = (data || []).map((row: Record<string, unknown>) => {
-    const u = row.users as Record<string, unknown> | null;
-    return { user_id: row.user_id, name: u?.name, avatar_url: u?.avatar_url, room_number: u?.room_number };
-  });
-
-  return json({ typing_users: typingUsers });
+  return json({ typing_users: await getTypingUsers(db, userId, groupType, groupId) });
 }
 
 export async function DELETE(request: NextRequest, { params }: { params: Promise<{ groupType: string }> }) {

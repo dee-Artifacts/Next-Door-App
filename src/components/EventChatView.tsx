@@ -142,7 +142,7 @@ export default function EventChatView({ eventId, eventName, onBack }: EventChatV
   const [showMessageInfo, setShowMessageInfo] = useState(false);
   const [messageInfoId, setMessageInfoId] = useState<number | null>(null);
   
-  const { typingUsers, sendTypingStatus } = useTypingStatus({ groupType: "event", groupId: String(eventId) });
+  const { typingUsers, updateTypingUsers, sendTypingStatus } = useTypingStatus({ groupType: "event", groupId: String(eventId) });
 
   useEffect(() => {
     fetchMembers();
@@ -151,12 +151,12 @@ export default function EventChatView({ eventId, eventName, onBack }: EventChatV
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [eventId]);
 
-  // Poll for event details, members, and messages every 1 second for faster updates
+  // Poll messages (and who is typing) every 5 seconds; details and members change rarely
+  usePolling(() => fetchMessages(), 5000);
   usePolling(() => {
     fetchMembers();
     fetchEventDetails();
-    fetchMessages();
-  }, 1000);
+  }, 30_000);
 
   // Remove optimistic messages when their real counterparts arrive
   useEffect(() => {
@@ -196,11 +196,13 @@ export default function EventChatView({ eventId, eventName, onBack }: EventChatV
 
   const fetchMessages = async () => {
     try {
-      const response = await fetch(`/api/events/${eventId}/messages`, {
+      const response = await fetch(`/api/events/${eventId}/messages?with_typing=1`, {
         credentials: 'include',
       });
       if (response.ok) {
-        const data = await response.json();
+        const body = await response.json();
+        const data = Array.isArray(body) ? body : body.messages;
+        updateTypingUsers(body.typing_users);
         
         // Defensive check: ensure data is an array
         if (Array.isArray(data)) {

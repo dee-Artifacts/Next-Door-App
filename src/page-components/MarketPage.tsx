@@ -583,7 +583,7 @@ export default function MarketPage() {
     fetchUnreadCounts(listings);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab, listings]);
-  usePolling(() => fetchUnreadCounts(listings), 3000, { enabled: pollUnreadCounts });
+  usePolling(() => fetchUnreadCounts(listings), 30_000, { enabled: pollUnreadCounts });
 
   const fetchUnreadCounts = async (listingsToFetch: MarketListing[]) => {
     const counts: Record<number, number> = {};

@@ -75,7 +75,7 @@ export default function EventsPage({ onGoToEventChat }: EventsPageProps) {
     fetchUnreadCounts(myEvents);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab, myEvents]);
-  usePolling(() => fetchUnreadCounts(myEvents), 3000, { enabled: pollUnreadCounts });
+  usePolling(() => fetchUnreadCounts(myEvents), 30_000, { enabled: pollUnreadCounts });
 
   // Calculate countdown for expired events
   useEffect(() => {

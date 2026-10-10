@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { usePolling } from "@/src/hooks/usePolling";
 
-interface TypingUser {
+export interface TypingUser {
   user_id: string;
   name: string;
   avatar_url: string | null;
@@ -14,53 +13,34 @@ interface UseTypingStatusOptions {
   enabled?: boolean;
 }
 
+/**
+ * Typing indicator state. Who is typing comes back with each chat messages poll
+ * (`typing_users` in the response) and is passed to `updateTypingUsers`; this
+ * hook no longer polls on its own.
+ */
 export function useTypingStatus({ groupType, groupId, enabled = true }: UseTypingStatusOptions) {
   const [typingUsers, setTypingUsers] = useState<TypingUser[]>([]);
   const lastSentRef = useRef<number>(0);
   const debounceTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const prevUserIdsRef = useRef<string>("");
 
-  const fetchTypingUsers = useCallback(async () => {
-      try {
-        const params = new URLSearchParams();
-        if (groupId) {
-          params.set("group_id", groupId);
-        }
-        const url = `/api/typing/${groupType}${params.toString() ? `?${params}` : ""}`;
-        const response = await fetch(url, { credentials: "include" });
-        if (response.ok) {
-          const data = await response.json();
-          // Deduplicate by user_id to prevent flickering
-          const users = data.typing_users || [];
-          const uniqueUsers = users.filter(
-            (user: TypingUser, index: number, self: TypingUser[]) =>
-              self.findIndex((u) => u.user_id === user.user_id) === index
-          );
-          
-          // Only update state if the user IDs have actually changed (prevents flickering)
-          const newUserIds = uniqueUsers.map((u: TypingUser) => u.user_id).sort().join(",");
-          if (newUserIds !== prevUserIdsRef.current) {
-            prevUserIdsRef.current = newUserIds;
-            setTypingUsers(uniqueUsers);
-          }
-        }
-      } catch (error) {
-        console.error("Failed to fetch typing status:", error);
-      }
-  }, [groupType, groupId]);
+  const updateTypingUsers = useCallback((users: TypingUser[] | undefined) => {
+    // Deduplicate by user_id to prevent flickering
+    const uniqueUsers = (users || []).filter(
+      (user, index, self) => self.findIndex((u) => u.user_id === user.user_id) === index
+    );
 
-  // Fetch typing users periodically
-  useEffect(() => {
-    if (!enabled) {
-      setTypingUsers([]);
-      prevUserIdsRef.current = "";
-      return;
+    // Only update state if the user IDs have actually changed (prevents flickering)
+    const newUserIds = uniqueUsers.map((u) => u.user_id).sort().join(",");
+    if (newUserIds !== prevUserIdsRef.current) {
+      prevUserIdsRef.current = newUserIds;
+      setTypingUsers(uniqueUsers);
     }
-    fetchTypingUsers();
-  }, [enabled, fetchTypingUsers]);
+  }, []);
 
-  // Poll every 2 seconds
-  usePolling(fetchTypingUsers, 2000, { enabled });
+  useEffect(() => {
+    if (!enabled) updateTypingUsers([]);
+  }, [enabled, updateTypingUsers]);
 
   // Send typing status (debounced - max once per 3 seconds)
   const sendTypingStatus = useCallback(async () => {
@@ -108,7 +88,8 @@ export function useTypingStatus({ groupType, groupId, enabled = true }: UseTypin
   }, []);
 
   return {
-    typingUsers,
+    typingUsers: enabled ? typingUsers : [],
+    updateTypingUsers,
     sendTypingStatus,
   };
 }
