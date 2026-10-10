@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server';
 import { getServiceClient } from '@/src/lib/api-helpers';
-import { dissolveCutoffIso } from '@/src/lib/events';
+import { dissolveCutoffIso, EVENT_GRACE_MS } from '@/src/lib/events';
 
 /**
  * Monthly cleanup (cron-job.org, POST with x-webhook-secret):
@@ -123,7 +123,8 @@ async function dissolveEvents(db: Db, events: Row[], nowIso: string, outOfTime: 
         creator_room: creatorMap[e.creator_user_id as string]?.room_number ?? null,
         total_attendees: membersByEvent[e.id as number]?.length || 0,
         is_deleted: false,
-        ended_at: nowIso,
+        // Same date the app showed before archiving (see loadUnarchivedEventHistory)
+        ended_at: new Date(new Date(e.end_datetime as string).getTime() + EVENT_GRACE_MS).toISOString(),
       }))
     ).select('id, event_id');
     if (histErr) throw histErr;
