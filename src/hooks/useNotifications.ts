@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { usePolling } from "@/src/hooks/usePolling";
 
 export function useNotifications(unreadMessageCount: number = 0, groupId?: string) {
   const [unreadMentionCount, setUnreadMentionCount] = useState(0);
@@ -38,13 +39,11 @@ export function useNotifications(unreadMessageCount: number = 0, groupId?: strin
 
   useEffect(() => {
     fetchUnreadCount();
-
-    // Poll for new notifications every 10 seconds
-    const interval = setInterval(fetchUnreadCount, 10000);
-
-    return () => clearInterval(interval);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [groupId]);
+
+  // Poll for new notifications every 10 seconds
+  usePolling(fetchUnreadCount, 10000);
 
   // Total count includes mentions + admin reminders + unread messages indicator (1 if any)
   const totalCount = unreadMentionCount + adminReminderCount + (unreadMessageCount > 0 ? 1 : 0);

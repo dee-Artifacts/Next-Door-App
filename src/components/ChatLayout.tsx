@@ -16,6 +16,7 @@ import { useUsers } from "@/src/hooks/useUsers";
 import { useUnreadCount } from "@/src/hooks/useUnreadCount";
 import { useNotifications } from "@/src/hooks/useNotifications";
 import { useTypingStatus } from "@/src/hooks/useTypingStatus";
+import { usePolling } from "@/src/hooks/usePolling";
 import { useToast } from "@/src/context/ToastContext";
 import NotificationPanel from "@/src/components/NotificationPanel";
 import SearchPanel from "@/src/components/SearchPanel";
@@ -162,37 +163,36 @@ export default function ChatLayout({ groupId, eventName, eventId, onBackToMain, 
   // Polls every 30s AND subscribes to realtime changes on the users row.
   // Either mechanism triggers an immediate sign-out + redirect to /blocked.
   const blockCheckRef = useRef(false);
+  const handleBlocked = async () => {
+    if (blockCheckRef.current) return;
+    blockCheckRef.current = true;
+    await createClient().auth.signOut();
+    router.replace('/blocked');
+  };
+
+  // Polling - fires every 30 seconds
+  const checkActive = async () => {
+    try {
+      const res = await fetch('/api/profile', { credentials: 'include' });
+      if (res.status === 401 || res.status === 403) {
+        await handleBlocked();
+        return;
+      }
+      if (res.ok) {
+        const data = await res.json();
+        if (data.is_active === 0 || data.is_active === false) {
+          await handleBlocked();
+        }
+      }
+    } catch { /* network error - don't redirect */ }
+  };
+  usePolling(checkActive, 30_000, { enabled: !!user?.id });
+
   useEffect(() => {
     if (!user?.id) return;
     blockCheckRef.current = false;
 
     const supabase = createClient();
-
-    const handleBlocked = async () => {
-      if (blockCheckRef.current) return;
-      blockCheckRef.current = true;
-      await supabase.auth.signOut();
-      router.replace('/blocked');
-    };
-
-    // Polling - fires every 30 seconds
-    const checkActive = async () => {
-      try {
-        const res = await fetch('/api/profile', { credentials: 'include' });
-        if (res.status === 401 || res.status === 403) {
-          await handleBlocked();
-          return;
-        }
-        if (res.ok) {
-          const data = await res.json();
-          if (data.is_active === 0 || data.is_active === false) {
-            await handleBlocked();
-          }
-        }
-      } catch { /* network error - don't redirect */ }
-    };
-
-    const pollInterval = setInterval(checkActive, 30_000);
 
     // Realtime - instant detection when admin changes is_active
     const channel = supabase
@@ -210,38 +210,31 @@ export default function ChatLayout({ groupId, eventName, eventId, onBackToMain, 
       .subscribe();
 
     return () => {
-      clearInterval(pollInterval);
       supabase.removeChannel(channel);
     };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id, router]);
 
   // Poll for new messages every 3 seconds
-  useEffect(() => {
-    const interval = setInterval(() => {
-      refetch();
-      refetchUnreadCount();
-      refetchNotifications();
-      fetchPinnedMessages();
-    }, 3000);
-
-    return () => clearInterval(interval);
-  }, [refetch, refetchUnreadCount, refetchNotifications]);
+  usePolling(() => {
+    refetch();
+    refetchUnreadCount();
+    refetchNotifications();
+    fetchPinnedMessages();
+  }, 3000);
 
   // Send heartbeat every 30 seconds to update online status
+  const sendHeartbeat = async () => {
+    try {
+      await fetch("/api/users/heartbeat", { method: "POST", credentials: 'include' });
+    } catch (error) {
+      console.error("Heartbeat error:", error);
+    }
+  };
   useEffect(() => {
-    const sendHeartbeat = async () => {
-      try {
-        await fetch("/api/users/heartbeat", { method: "POST", credentials: 'include' });
-      } catch (error) {
-        console.error("Heartbeat error:", error);
-      }
-    };
-
     sendHeartbeat();
-    const interval = setInterval(sendHeartbeat, 30000);
-
-    return () => clearInterval(interval);
   }, []);
+  usePolling(sendHeartbeat, 30000);
 
   // Close reaction bar on scroll
   useEffect(() => {

@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { usePolling } from "@/src/hooks/usePolling";
 import { useAuth } from "@/src/lib/auth-hook";
 import ChatHeader from "@/src/components/ChatHeader";
 import EventUserList from "@/src/components/EventUserList";
@@ -147,16 +148,15 @@ export default function EventChatView({ eventId, eventName, onBack }: EventChatV
     fetchMembers();
     fetchEventDetails();
     fetchMessages();
-    
-    // Poll for event details, members, and messages every 1 second for faster updates
-    const interval = setInterval(() => {
-      fetchMembers();
-      fetchEventDetails();
-      fetchMessages();
-    }, 1000);
-    
-    return () => clearInterval(interval);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [eventId]);
+
+  // Poll for event details, members, and messages every 1 second for faster updates
+  usePolling(() => {
+    fetchMembers();
+    fetchEventDetails();
+    fetchMessages();
+  }, 1000);
 
   // Remove optimistic messages when their real counterparts arrive
   useEffect(() => {

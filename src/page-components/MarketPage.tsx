@@ -1,5 +1,6 @@
 'use client';
 import { useState, useEffect } from "react";
+import { usePolling } from "@/src/hooks/usePolling";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/src/lib/auth-hook";
 import { ArrowLeft, Plus, ChevronLeft, ChevronRight, MessageCircle, Users, Hand, Trash2, X, Check, MessageSquarePlus, LogOut, CheckCircle, MoreVertical, History, HelpCircle } from "lucide-react";
@@ -576,12 +577,13 @@ export default function MarketPage() {
   }, [activeTab]);
 
   // Poll unread counts for My Listings tab
+  const pollUnreadCounts = activeTab === "my-listings" && listings.length > 0;
   useEffect(() => {
-    if (activeTab !== "my-listings" || listings.length === 0) return;
+    if (!pollUnreadCounts) return;
     fetchUnreadCounts(listings);
-    const interval = setInterval(() => fetchUnreadCounts(listings), 3000);
-    return () => clearInterval(interval);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab, listings]);
+  usePolling(() => fetchUnreadCounts(listings), 3000, { enabled: pollUnreadCounts });
 
   const fetchUnreadCounts = async (listingsToFetch: MarketListing[]) => {
     const counts: Record<number, number> = {};

@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { usePolling } from "@/src/hooks/usePolling";
 
 export function useUnreadCount() {
   const [unreadCount, setUnreadCount] = useState(0);
@@ -21,12 +22,10 @@ export function useUnreadCount() {
 
   useEffect(() => {
     fetchUnreadCount();
-
-    // Poll for updates every 5 seconds
-    const interval = setInterval(fetchUnreadCount, 5000);
-
-    return () => clearInterval(interval);
   }, []);
+
+  // Poll for updates every 5 seconds
+  usePolling(fetchUnreadCount, 5000);
 
   return {
     unreadCount,

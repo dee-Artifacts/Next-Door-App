@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { usePolling } from "@/src/hooks/usePolling";
 import { Bell, MessageCircle, AlertTriangle, Eye, Trash2, Clock } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { NotificationsSkeleton } from "@/src/components/Skeletons";
@@ -57,10 +58,10 @@ export default function NotificationPanel({
 
   useEffect(() => {
     fetchData();
-    // Auto-refresh every 30 seconds to handle expiring reminders
-    const interval = setInterval(fetchData, 30000);
-    return () => clearInterval(interval);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [groupId]);
+  // Auto-refresh every 30 seconds to handle expiring reminders
+  usePolling(() => fetchData(), 30000);
 
   const fetchData = async () => {
     try {

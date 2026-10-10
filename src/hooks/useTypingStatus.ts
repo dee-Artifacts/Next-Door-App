@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
+import { usePolling } from "@/src/hooks/usePolling";
 
 interface TypingUser {
   user_id: string;
@@ -19,15 +20,7 @@ export function useTypingStatus({ groupType, groupId, enabled = true }: UseTypin
   const debounceTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const prevUserIdsRef = useRef<string>("");
 
-  // Fetch typing users periodically
-  useEffect(() => {
-    if (!enabled) {
-      setTypingUsers([]);
-      prevUserIdsRef.current = "";
-      return;
-    }
-
-    const fetchTypingUsers = async () => {
+  const fetchTypingUsers = useCallback(async () => {
       try {
         const params = new URLSearchParams();
         if (groupId) {
@@ -54,16 +47,20 @@ export function useTypingStatus({ groupType, groupId, enabled = true }: UseTypin
       } catch (error) {
         console.error("Failed to fetch typing status:", error);
       }
-    };
+  }, [groupType, groupId]);
 
-    // Initial fetch
+  // Fetch typing users periodically
+  useEffect(() => {
+    if (!enabled) {
+      setTypingUsers([]);
+      prevUserIdsRef.current = "";
+      return;
+    }
     fetchTypingUsers();
+  }, [enabled, fetchTypingUsers]);
 
-    // Poll every 2 seconds
-    const interval = setInterval(fetchTypingUsers, 2000);
-
-    return () => clearInterval(interval);
-  }, [groupType, groupId, enabled]);
+  // Poll every 2 seconds
+  usePolling(fetchTypingUsers, 2000, { enabled });
 
   // Send typing status (debounced - max once per 3 seconds)
   const sendTypingStatus = useCallback(async () => {

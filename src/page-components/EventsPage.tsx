@@ -1,5 +1,6 @@
 'use client';
 import { useState, useEffect, useRef } from "react";
+import { usePolling } from "@/src/hooks/usePolling";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ArrowLeft, Plus, Calendar, Clock, Users, MapPin, Sparkles, Zap, MessageCircle, Trash2, LogOut, Check, X, MoreVertical, History, HelpCircle } from "lucide-react";
 import { EventListSkeleton } from "@/src/components/Skeletons";
@@ -68,12 +69,13 @@ export default function EventsPage({ onGoToEventChat }: EventsPageProps) {
   }, [activeTab]);
 
   // Poll unread counts for My Events tab
+  const pollUnreadCounts = activeTab === "my-events" && myEvents.length > 0;
   useEffect(() => {
-    if (activeTab !== "my-events" || myEvents.length === 0) return;
+    if (!pollUnreadCounts) return;
     fetchUnreadCounts(myEvents);
-    const interval = setInterval(() => fetchUnreadCounts(myEvents), 3000);
-    return () => clearInterval(interval);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab, myEvents]);
+  usePolling(() => fetchUnreadCounts(myEvents), 3000, { enabled: pollUnreadCounts });
 
   // Calculate countdown for expired events
   useEffect(() => {

@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { usePolling } from "@/src/hooks/usePolling";
 import { useAuth } from "@/src/lib/auth-hook";
 import { Package, CheckCircle, X } from "lucide-react";
 import ListingMessageList, { ListingMessageListRef } from "./ListingMessageList";
@@ -83,43 +84,43 @@ export default function ListingChatView({ listingId, onBack }: ListingChatViewPr
   }, [listingId]);
 
   // Fetch messages
-  useEffect(() => {
-    const fetchMessages = async () => {
-      try {
-        const response = await fetch(`/api/listings/${listingId}/messages`, { credentials: 'include' });
-        if (response.ok) {
-          const data = await response.json();
-          setMessages(Array.isArray(data) ? data : []);
-        }
-      } catch (error) {
-        console.error("Error fetching messages:", error);
-      } finally {
-        setIsLoading(false);
+  const fetchMessages = async () => {
+    try {
+      const response = await fetch(`/api/listings/${listingId}/messages`, { credentials: 'include' });
+      if (response.ok) {
+        const data = await response.json();
+        setMessages(Array.isArray(data) ? data : []);
       }
-    };
+    } catch (error) {
+      console.error("Error fetching messages:", error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+  useEffect(() => {
     fetchMessages();
-    const interval = setInterval(fetchMessages, 2000);
-    return () => clearInterval(interval);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [listingId]);
+  usePolling(fetchMessages, 2000);
 
   // Fetch members
-  useEffect(() => {
-    const fetchMembers = async () => {
-      try {
-        const response = await fetch(`/api/listings/${listingId}/members`, { credentials: 'include' });
-        if (response.ok) {
-          const data = await response.json();
-          const newMembers: ListingMember[] = Array.isArray(data.members) ? data.members : [];
-          setMembers(newMembers);
-        }
-      } catch (error) {
-        console.error("Error fetching members:", error);
+  const fetchMembers = async () => {
+    try {
+      const response = await fetch(`/api/listings/${listingId}/members`, { credentials: 'include' });
+      if (response.ok) {
+        const data = await response.json();
+        const newMembers: ListingMember[] = Array.isArray(data.members) ? data.members : [];
+        setMembers(newMembers);
       }
-    };
+    } catch (error) {
+      console.error("Error fetching members:", error);
+    }
+  };
+  useEffect(() => {
     fetchMembers();
-    const interval = setInterval(fetchMembers, 5000);
-    return () => clearInterval(interval);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [listingId]);
+  usePolling(fetchMembers, 5000);
 
   // Remove optimistic messages when confirmed
   useEffect(() => {
