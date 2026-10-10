@@ -1,5 +1,6 @@
 import { NextRequest } from 'next/server';
 import { authenticate, getServiceClient, json, error, sanitizeHtml } from '@/src/lib/api-helpers';
+import { isEventDissolved } from '@/src/lib/events';
 import { checkEventAccess, loadEventMessages } from '@/src/lib/chat-messages';
 import { getTypingUsers } from '@/src/lib/typing';
 
@@ -41,6 +42,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   if (!evt) return error('Event not found', 400);
   // Block only when event has been fully deleted (soft-delete uses year 2000)
   if ((evt as Record<string, unknown>).end_datetime && String((evt as Record<string, unknown>).end_datetime).startsWith('2000-')) return error('Event has been deleted', 400);
+  if (isEventDissolved(evt.end_datetime)) return error('This event has ended', 400);
 
   const body = await request.json().catch(() => ({}));
   const { content, reply_to_message_id, attachments } = body;

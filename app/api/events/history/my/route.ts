@@ -1,4 +1,5 @@
 import { authenticate, getServiceClient, json, error } from '@/src/lib/api-helpers';
+import { loadUnarchivedEventHistory } from '@/src/lib/events';
 
 export async function GET() {
   const userId = await authenticate();
@@ -23,7 +24,9 @@ export async function GET() {
     }
   }
 
-  const merged = [...(created || []), ...attendedData] as Record<string, unknown>[];
+  // Dissolved events the monthly cleanup hasn't archived yet show up here too
+  const unarchived = await loadUnarchivedEventHistory(db, { userId });
+  const merged = [...unarchived, ...(created || []), ...attendedData] as Record<string, unknown>[];
   merged.sort((a, b) => new Date(b.ended_at as string).getTime() - new Date(a.ended_at as string).getTime());
 
   return json(merged);

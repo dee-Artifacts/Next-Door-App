@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server';
 import { authenticate, getServiceClient, json, error, sanitizeHtml } from '@/src/lib/api-helpers';
 import { isRateLimited, getClientIp } from '@/src/lib/rate-limit';
+import { dissolveCutoffIso } from '@/src/lib/events';
 
 export async function GET(request: NextRequest) {
   if (isRateLimited(getClientIp(request), 'events:get', 60)) return error('Too many requests', 429);
@@ -11,6 +12,7 @@ export async function GET(request: NextRequest) {
   // Fetch events without FK join (no REFERENCES constraint on events table)
   const { data: events } = await db.from('events')
     .select('*')
+    .gt('end_datetime', dissolveCutoffIso())
     .order('start_datetime', { ascending: true });
 
   // Batch-fetch creator user data

@@ -1,5 +1,6 @@
 import { NextRequest } from 'next/server';
 import { authenticate, getServiceClient, json, error } from '@/src/lib/api-helpers';
+import { isEventDissolved } from '@/src/lib/events';
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const userId = await authenticate();
@@ -16,7 +17,8 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   if (!membership) return error('Not a member of this event', 403);
 
   // Fetch event to get creator
-  const { data: evt } = await db.from('events').select('creator_user_id').eq('id', eventId).maybeSingle();
+  const { data: evt } = await db.from('events').select('creator_user_id, end_datetime').eq('id', eventId).maybeSingle();
+  if (!evt || isEventDissolved(evt.end_datetime)) return error('This event has ended', 404);
 
   // Fetch all members
   const { data: rawMembers } = await db

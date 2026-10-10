@@ -1,5 +1,6 @@
 import { NextRequest } from 'next/server';
 import { authenticate, getServiceClient, json, error } from '@/src/lib/api-helpers';
+import { isEventDissolved } from '@/src/lib/events';
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const userId = await authenticate();
@@ -10,6 +11,9 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
   const { data: membership } = await db.from('event_members').select('id').eq('event_id', eventId).eq('user_id', userId).maybeSingle();
   if (!membership) return json({ count: 0 });
+
+  const { data: evt } = await db.from('events').select('end_datetime').eq('id', eventId).maybeSingle();
+  if (!evt || isEventDissolved(evt.end_datetime)) return json({ count: 0 });
 
   // Count messages from others with no read receipt by this user
   const { data: allMsgIds } = await db.from('event_messages')

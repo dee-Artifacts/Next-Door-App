@@ -1,4 +1,5 @@
 import { authenticate, getServiceClient, json, error } from '@/src/lib/api-helpers';
+import { dissolveCutoffIso } from '@/src/lib/events';
 
 export async function GET() {
   const userId = await authenticate();
@@ -12,7 +13,9 @@ export async function GET() {
   // Fetch events without FK join (no REFERENCES constraint on events table)
   const { data: events } = await db.from('events')
     .select('*')
-    .in('id', eventIds).order('start_datetime', { ascending: true });
+    .in('id', eventIds)
+    .gt('end_datetime', dissolveCutoffIso())
+    .order('start_datetime', { ascending: true });
 
   // Batch-fetch creator user data
   const creatorIds = Array.from(new Set((events || []).map((e: Record<string, unknown>) => e.creator_user_id as string)));

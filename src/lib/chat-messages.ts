@@ -4,6 +4,7 @@
  */
 
 import { getServiceClient } from '@/src/lib/api-helpers';
+import { isEventDissolved } from '@/src/lib/events';
 
 type Db = ReturnType<typeof getServiceClient>;
 interface LoadOptions { afterId?: number }
@@ -129,8 +130,16 @@ export async function loadMainMessages(db: Db, userId: string, groupId: string, 
   // Batch-fetch events for messages with event_id
   const eventMsgIds = Array.from(new Set(messages.map(m => m.event_id as number).filter(Boolean)));
   const eventObjMap: Record<number, Record<string, unknown>> = {};
+  // Events dissolved (ended 24h+ ago) but not yet removed by the monthly cleanup:
+  // show their card the way cleanup leaves it, as a deleted message.
+  const dissolvedEventNames: Record<number, string> = {};
   if (eventMsgIds.length > 0) {
-    const { data: evts } = await db.from('events').select('*').in('id', eventMsgIds);
+    const { data: allEvts } = await db.from('events').select('*').in('id', eventMsgIds);
+    const evts = (allEvts || []).filter((e: Record<string, unknown>) => {
+      if (!isEventDissolved(e.end_datetime as string)) return true;
+      dissolvedEventNames[e.id as number] = e.name as string;
+      return false;
+    });
     const evtCreatorIds = Array.from(new Set((evts || []).map((e: Record<string, unknown>) => e.creator_user_id as string)));
     const evtUserMap: Record<string, Record<string, unknown>> = {};
     if (evtCreatorIds.length > 0) {
@@ -160,6 +169,9 @@ export async function loadMainMessages(db: Db, userId: string, groupId: string, 
       const eid = m.event_id as number | null;
       if (eid && eventObjMap[eid]) {
         (m as Record<string, unknown>).event = eventObjMap[eid];
+      } else if (eid && dissolvedEventNames[eid] !== undefined) {
+        m.is_deleted = true;
+        m.content = `"${dissolvedEventNames[eid]}" event has been deleted`;
       }
     }
   }
@@ -259,6 +271,9 @@ export async function checkEventAccess(db: Db, userId: string, eventId: number):
 
   const { data: membership } = await db.from('event_members').select('id').eq('event_id', eventId).eq('user_id', userId).maybeSingle();
   if (!membership) return { status: 403, message: 'Not a member of this event' };
+
+  const { data: evt } = await db.from('events').select('end_datetime').eq('id', eventId).maybeSingle();
+  if (!evt || isEventDissolved(evt.end_datetime)) return { status: 404, message: 'This event has ended' };
   return null;
 }
 

@@ -1,5 +1,6 @@
 import { NextRequest } from 'next/server';
 import { authenticate, getServiceClient, json, error } from '@/src/lib/api-helpers';
+import { isEventDissolved } from '@/src/lib/events';
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const userId = await authenticate();
@@ -8,7 +9,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const db = getServiceClient();
 
   const { data: evt } = await db.from('events').select('*').eq('id', parseInt(id)).single();
-  if (!evt) return error('Event not found', 404);
+  if (!evt || isEventDissolved(evt.end_datetime)) return error('Event not found', 404);
 
   const { data: creatorUser } = await db.from('users').select('name, is_deleted, is_active').eq('id', evt.creator_user_id).maybeSingle();
   const { count } = await db.from('event_members').select('*', { count: 'exact', head: true }).eq('event_id', evt.id);
