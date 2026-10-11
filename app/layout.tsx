@@ -4,6 +4,7 @@ import { AuthProvider } from "@/src/lib/auth-hook";
 import { ThemeProvider } from "@/src/context/ThemeContext";
 import { ToastProvider } from "@/src/context/ToastContext";
 import UmamiAnalytics from "@/src/components/UmamiAnalytics";
+import RealtimeDebugBadge from "@/src/components/RealtimeDebugBadge";
 
 const SITE_URL = "https://nextdoor.deeproduct.org";
 const SITE_DESCRIPTION =
@@ -110,6 +111,7 @@ export default function RootLayout({
           </ThemeProvider>
         </AuthProvider>
         <UmamiAnalytics />
+        <RealtimeDebugBadge />
       </body>
     </html>
   );
