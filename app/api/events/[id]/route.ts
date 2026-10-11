@@ -69,8 +69,12 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
   }
 
   // Fetch all event message IDs for cascade delete
-  const { data: eventMsgs } = await db.from('event_messages').select('id, attachments:event_message_attachments(file_key)').eq('event_id', eventId);
+  const { data: eventMsgs } = await db.from('event_messages').select('id').eq('event_id', eventId);
   const msgIds = (eventMsgs || []).map((m: Record<string, unknown>) => m.id as number);
+  // Separate query: the live DB has no FK for an embedded attachments join
+  const { data: attachments } = msgIds.length > 0
+    ? await db.from('event_message_attachments').select('file_key').in('event_message_id', msgIds)
+    : { data: [] };
 
   // 1. Delete reads and reactions linked to event messages
   if (msgIds.length > 0) {
@@ -80,11 +84,8 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
 
   // 2. Delete attachment files from storage
   const fileKeys: string[] = [];
-  for (const msg of (eventMsgs || [])) {
-    const atts = (msg as Record<string, unknown>).attachments as Array<{ file_key: string }> | null;
-    for (const att of (atts || [])) {
-      if (att.file_key) fileKeys.push(att.file_key);
-    }
+  for (const att of (attachments || []) as Array<{ file_key: string | null }>) {
+    if (att.file_key) fileKeys.push(att.file_key);
   }
   if (fileKeys.length > 0) {
     // file_key format: "bucket/path" - group by bucket

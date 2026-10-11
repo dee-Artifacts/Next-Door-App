@@ -56,11 +56,9 @@ export async function DELETE(_request: NextRequest, { params }: { params: Promis
     const evtRec = evt as Record<string, unknown>;
     const eventId = evtRec.id as number;
 
-    // Fetch all event messages (with attachment file_keys for storage cleanup)
-    const { data: eventMsgs } = await db
-      .from('event_messages')
-      .select('id, attachments:event_message_attachments(file_key)')
-      .eq('event_id', eventId);
+    // Fetch all event messages, then their attachment file_keys for storage cleanup
+    // (separate query: the live DB has no FK for an embedded attachments join)
+    const { data: eventMsgs } = await db.from('event_messages').select('id').eq('event_id', eventId);
     const msgIds = (eventMsgs || []).map((m: Record<string, unknown>) => m.id as number);
 
     // Fetch members before deleting (for history archive)
@@ -71,12 +69,10 @@ export async function DELETE(_request: NextRequest, { params }: { params: Promis
       await db.from('event_message_reactions').delete().in('event_message_id', msgIds);
 
       // Delete attachment files from storage
+      const { data: attachments } = await db.from('event_message_attachments').select('file_key').in('event_message_id', msgIds);
       const fileKeys: string[] = [];
-      for (const msg of (eventMsgs || [])) {
-        const atts = (msg as Record<string, unknown>).attachments as Array<{ file_key: string }> | null;
-        for (const att of (atts || [])) {
-          if (att.file_key) fileKeys.push(att.file_key);
-        }
+      for (const att of (attachments || []) as Array<{ file_key: string | null }>) {
+        if (att.file_key) fileKeys.push(att.file_key);
       }
       if (fileKeys.length > 0) {
         const byBucket: Record<string, string[]> = {};

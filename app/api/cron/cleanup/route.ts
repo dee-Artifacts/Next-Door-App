@@ -141,21 +141,24 @@ async function dissolveEvents(db: Db, events: Row[], nowIso: string, outOfTime: 
   // Event chat messages, their reads/reactions/attachments and stored files
   for (;;) {
     if (outOfTime()) return false;
+    // Two plain queries: the live DB has no FK for an embedded attachments join
     const { data: msgs, error: msgErr } = await db.from('event_messages')
-      .select('id, attachments:event_message_attachments(file_key)')
+      .select('id')
       .in('event_id', eventIds)
       .limit(MESSAGE_BATCH);
     if (msgErr) throw msgErr;
     if (!msgs?.length) break;
 
     const msgIds = msgs.map((m: Row) => m.id as number);
+    const { data: atts, error: attErr } = await db.from('event_message_attachments')
+      .select('file_key')
+      .in('event_message_id', msgIds);
+    if (attErr) throw attErr;
     const byBucket: Record<string, string[]> = {};
-    for (const msg of msgs as Row[]) {
-      for (const att of (msg.attachments as Array<{ file_key: string }> | null) ?? []) {
-        if (!att.file_key) continue;
-        const [bucket, ...rest] = att.file_key.split('/');
-        (byBucket[bucket] ||= []).push(rest.join('/'));
-      }
+    for (const att of (atts || []) as Array<{ file_key: string | null }>) {
+      if (!att.file_key) continue;
+      const [bucket, ...rest] = att.file_key.split('/');
+      (byBucket[bucket] ||= []).push(rest.join('/'));
     }
     for (const [bucket, paths] of Object.entries(byBucket)) {
       await db.storage.from(bucket).remove(paths);
