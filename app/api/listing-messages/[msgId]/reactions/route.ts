@@ -1,5 +1,6 @@
 import { NextRequest } from 'next/server';
 import { authenticate, getServiceClient, json, error } from '@/src/lib/api-helpers';
+import { touchMessage } from '@/src/lib/message-touch';
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ msgId: string }> }) {
   const userId = await authenticate();
@@ -37,6 +38,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   } else {
     await db.from('listing_message_reactions').insert({ listing_message_id: messageId, user_id: userId, emoji });
   }
+  await touchMessage(db, 'listing_messages', messageId);
 
   return json({ success: true });
 }

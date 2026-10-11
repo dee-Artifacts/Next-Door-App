@@ -1,5 +1,6 @@
 import { NextRequest } from 'next/server';
 import { authenticate, getServiceClient, json, error } from '@/src/lib/api-helpers';
+import { touchEventCard } from '@/src/lib/message-touch';
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const userId = await authenticate();
@@ -19,6 +20,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   const { data: user } = await db.from('users').select('name, room_number').eq('id', userId).single();
 
   await db.from('event_members').delete().eq('event_id', eventId).eq('user_id', userId);
+  await touchEventCard(db, eventId);
 
   if (user) {
     await db.from('event_messages').insert({

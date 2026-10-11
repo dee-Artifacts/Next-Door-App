@@ -12,7 +12,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   const db = getServiceClient();
   if (!await requireAdmin(userId, db)) return error('Only admins can pin messages', 403);
   const { id } = await params;
-  await db.from('messages').update({ is_pinned: true }).eq('id', parseInt(id));
+  await db.from('messages').update({ is_pinned: true, updated_at: new Date().toISOString() }).eq('id', parseInt(id));
   return json({ success: true });
 }
 
@@ -22,6 +22,6 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
   const db = getServiceClient();
   if (!await requireAdmin(userId, db)) return error('Only admins can unpin messages', 403);
   const { id } = await params;
-  await db.from('messages').update({ is_pinned: false }).eq('id', parseInt(id));
+  await db.from('messages').update({ is_pinned: false, updated_at: new Date().toISOString() }).eq('id', parseInt(id));
   return json({ success: true });
 }

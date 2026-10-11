@@ -1,5 +1,6 @@
 import { NextRequest } from 'next/server';
 import { authenticate, getServiceClient, json, error } from '@/src/lib/api-helpers';
+import { touchMessage, touchListingCard } from '@/src/lib/message-touch';
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const userId = await authenticate();
@@ -23,6 +24,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   if (!winnerUser) return error('Winner user not found', 404);
 
   await db.from('market_listings').update({ winner_user_id: winnerId, status: 'confirmed' }).eq('id', listingId);
+  await touchMessage(db, 'messages', listing.message_id);
 
   await db.from('listing_messages').insert({
     listing_id: listingId, user_id: userId,
@@ -44,6 +46,7 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
   if (listing.creator_user_id !== userId) return error('Only the creator can clear the winner', 403);
 
   await db.from('market_listings').update({ winner_user_id: null, status: 'discussion' }).eq('id', listingId);
+  await touchListingCard(db, listingId);
   await db.from('listing_messages').insert({
     listing_id: listingId, user_id: userId,
     content: 'Winner selection has been cleared.',

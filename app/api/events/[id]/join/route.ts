@@ -1,5 +1,6 @@
 import { NextRequest } from 'next/server';
 import { authenticate, getServiceClient, json, error } from '@/src/lib/api-helpers';
+import { touchEventCard } from '@/src/lib/message-touch';
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const userId = await authenticate();
@@ -23,6 +24,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   if (existing) return json({ success: true, already_member: true });
 
   await db.from('event_members').insert({ event_id: eventId, user_id: userId, is_admin: 0 });
+  await touchEventCard(db, eventId);
 
   // Create join message in event chat
   const { data: user } = await db.from('users').select('name, room_number').eq('id', userId).single();

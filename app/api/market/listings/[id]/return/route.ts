@@ -1,5 +1,6 @@
 import { NextRequest } from 'next/server';
 import { authenticate, getServiceClient, json, error } from '@/src/lib/api-helpers';
+import { touchMessage } from '@/src/lib/message-touch';
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const userId = await authenticate();
@@ -20,6 +21,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   if (listing.type === 'requesting' && !isCreator) return error('Only the creator can mark this rental as returned', 403);
 
   await db.from('market_listings').update({ status: 'returned' }).eq('id', listingId);
+  await touchMessage(db, 'messages', listing.message_id);
 
   const { data: u } = await db.from('users').select('name').eq('id', userId).single();
   await db.from('listing_messages').insert({

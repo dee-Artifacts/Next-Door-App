@@ -1,5 +1,6 @@
 import { NextRequest } from 'next/server';
 import { authenticate, getServiceClient, json, error } from '@/src/lib/api-helpers';
+import { touchMessage } from '@/src/lib/message-touch';
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const userId = await authenticate();
@@ -54,6 +55,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   await archiveToHistory(db, listingId, false, helperUserIds, helperNames);
 
   await db.from('market_listings').update({ is_deleted: true, is_completed: true }).eq('id', listingId);
+  await touchMessage(db, 'messages', listing.message_id);
 
   return json({ success: true });
 }

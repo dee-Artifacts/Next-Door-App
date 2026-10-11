@@ -1,5 +1,6 @@
 import { NextRequest } from 'next/server';
 import { authenticate, getServiceClient, json, error } from '@/src/lib/api-helpers';
+import { touchMessage, touchListingCard } from '@/src/lib/message-touch';
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const userId = await authenticate();
@@ -31,6 +32,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   if (listing.status === 'open') {
     await db.from('market_listings').update({ status: 'discussion' }).eq('id', listingId);
   }
+  await touchMessage(db, 'messages', listing.message_id);
 
   return json({ success: true });
 }
@@ -45,6 +47,7 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
   const { data: u } = await db.from('users').select('name, room_number').eq('id', userId).single();
 
   await db.from('market_listing_interested').delete().eq('listing_id', listingId).eq('user_id', userId);
+  await touchListingCard(db, listingId);
 
   if (u) {
     await db.from('listing_messages').insert({
