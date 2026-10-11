@@ -51,6 +51,18 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   const { data: msgIds } = await db.from('listing_messages').select('id').eq('listing_id', listingId);
   const ids = (msgIds || []).map((m: { id: number }) => m.id);
   if (ids.length > 0) {
+    // Delete attachment files from storage, then their rows
+    const { data: msgAttachments } = await db.from('listing_message_attachments').select('file_key').in('listing_message_id', ids);
+    const byBucket: Record<string, string[]> = {};
+    for (const att of (msgAttachments || []) as Array<{ file_key: string | null }>) {
+      if (!att.file_key) continue;
+      const [bucket, ...rest] = att.file_key.split('/');
+      (byBucket[bucket] ||= []).push(rest.join('/'));
+    }
+    for (const [bucket, paths] of Object.entries(byBucket)) {
+      await db.storage.from(bucket).remove(paths);
+    }
+
     await db.from('listing_message_attachments').delete().in('listing_message_id', ids);
     await db.from('listing_message_reactions').delete().in('listing_message_id', ids);
     await db.from('listing_message_reads').delete().in('listing_message_id', ids);
