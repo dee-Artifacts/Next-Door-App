@@ -17,6 +17,14 @@
 -- subject to the policy below; clients have no INSERT policy and cannot
 -- broadcast or forge events.
 
+-- Stop here if this project has no realtime.send (Broadcast from Database)
+do $$
+begin
+  if to_regprocedure('realtime.send(jsonb, text, text, boolean)') is null then
+    raise exception 'realtime.send is not available in this project; nothing was changed';
+  end if;
+end $$;
+
 create schema if not exists nextdoor_realtime;
 revoke all on schema nextdoor_realtime from public;
 grant usage on schema nextdoor_realtime to authenticated;
@@ -102,6 +110,22 @@ using (
   and (select nextdoor_realtime.can_join_topic((select realtime.topic())))
 );
 
+-- ── Sending: a Realtime failure must never fail the write that caused it ───
+create or replace function nextdoor_realtime.send(payload jsonb, event text, topic text)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  perform realtime.send(payload, event, topic, true);
+exception when others then
+  raise warning 'realtime broadcast to % failed: %', topic, sqlerrm;
+end;
+$$;
+
+revoke all on function nextdoor_realtime.send(jsonb, text, text) from public;
+
 -- ── Message inserts and updates (edits, deletes, reactions, pins, cards) ──
 -- Reactions, pins and card changes already bump the message's updated_at
 -- (src/lib/message-touch.ts), so one trigger per message table covers them.
@@ -121,7 +145,7 @@ begin
     when 'listing_messages' then 'listing:' || (r->>'listing_id')
   end;
   if topic is not null then
-    perform realtime.send(jsonb_build_object('id', r->'id'), 'changed', topic, true);
+    perform nextdoor_realtime.send(jsonb_build_object('id', r->'id'), 'changed', topic);
   end if;
   return null;
 end;
@@ -147,16 +171,16 @@ as $$
 begin
   if tg_table_name = 'message_reads' then
     if exists (select 1 from new_rows) then
-      perform realtime.send('{}'::jsonb, 'read', 'main', true);
+      perform nextdoor_realtime.send('{}'::jsonb, 'read', 'main');
     end if;
   elsif tg_table_name = 'event_message_reads' then
-    perform realtime.send('{}'::jsonb, 'read', 'event:' || c.event_id, true)
+    perform nextdoor_realtime.send('{}'::jsonb, 'read', 'event:' || c.event_id)
     from (
       select distinct m.event_id
       from new_rows n join public.event_messages m on m.id = n.event_message_id
     ) c;
   elsif tg_table_name = 'listing_message_reads' then
-    perform realtime.send('{}'::jsonb, 'read', 'listing:' || c.listing_id, true)
+    perform nextdoor_realtime.send('{}'::jsonb, 'read', 'listing:' || c.listing_id)
     from (
       select distinct m.listing_id
       from new_rows n join public.listing_messages m on m.id = n.listing_message_id
@@ -195,7 +219,7 @@ begin
     when 'listing' then 'listing:' || new.group_id
   end;
   if topic is not null then
-    perform realtime.send(jsonb_build_object('user_id', new.user_id), 'typing', topic, true);
+    perform nextdoor_realtime.send(jsonb_build_object('user_id', new.user_id), 'typing', topic);
   end if;
   return null;
 end;
@@ -220,7 +244,7 @@ begin
     when 'event_members' then 'event:' || (r->>'event_id')
     when 'market_listing_interested' then 'listing:' || (r->>'listing_id')
   end;
-  perform realtime.send('{}'::jsonb, 'members', topic, true);
+  perform nextdoor_realtime.send('{}'::jsonb, 'members', topic);
   return null;
 end;
 $$;
@@ -241,9 +265,9 @@ set search_path = ''
 as $$
 begin
   if tg_table_name = 'notifications' then
-    perform realtime.send('{}'::jsonb, 'notify', 'user:' || new.user_id, true);
+    perform nextdoor_realtime.send('{}'::jsonb, 'notify', 'user:' || new.user_id);
   elsif tg_table_name = 'users' then
-    perform realtime.send('{}'::jsonb, 'account', 'user:' || new.id, true);
+    perform nextdoor_realtime.send('{}'::jsonb, 'account', 'user:' || new.id);
   end if;
   return null;
 end;
@@ -266,7 +290,7 @@ security definer
 set search_path = ''
 as $$
 begin
-  perform realtime.send('{}'::jsonb, 'counts', 'main', true);
+  perform nextdoor_realtime.send('{}'::jsonb, 'counts', 'main');
   return null;
 end;
 $$;
