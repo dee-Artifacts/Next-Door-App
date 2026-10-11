@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server';
-import { authenticate, getServiceClient, json, error } from '@/src/lib/api-helpers';
+import { authenticate, getServiceClient, isBlocked, json, error } from '@/src/lib/api-helpers';
 import { getMainUnreadCount } from '@/src/lib/unread';
 import {
   loadMainMessages, loadEventMessages, loadListingMessages, checkEventAccess, checkListingAccess,
@@ -21,10 +21,7 @@ export async function GET(request: NextRequest) {
   if (!userId) return error('Unauthorized', 401);
   const db = getServiceClient();
 
-  const { data: me } = await db.from('users').select('is_active, is_deleted').eq('id', userId).single();
-  if (me && (me.is_active === 0 || me.is_active === false) && !me.is_deleted) {
-    return error('Your account has been blocked', 403);
-  }
+  if (await isBlocked(db, userId)) return error('Your account has been blocked', 403);
 
   const chat = request.nextUrl.searchParams.get('chat');
   const options = readChatCursor(request.nextUrl.searchParams);

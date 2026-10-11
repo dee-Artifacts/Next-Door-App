@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server';
-import { authenticate, getServiceClient, json, error, sanitizeHtml } from '@/src/lib/api-helpers';
+import { authenticate, getServiceClient, isBlocked, json, error, sanitizeHtml } from '@/src/lib/api-helpers';
 import { loadMainMessages, newChatCursor, readChatCursor } from '@/src/lib/chat-messages';
 import { getTypingUsers } from '@/src/lib/typing';
 import { isRateLimited, getClientIp } from '@/src/lib/rate-limit';
@@ -14,6 +14,7 @@ export async function GET(request: NextRequest) {
   const options = readChatCursor(request.nextUrl.searchParams);
   const cursor = newChatCursor();
   const db = getServiceClient();
+  if (await isBlocked(db, userId)) return error('Your account has been blocked', 403);
 
   try {
     const [result, typingUsers] = await Promise.all([

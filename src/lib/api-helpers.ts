@@ -36,6 +36,12 @@ export async function authenticate(): Promise<string | null> {
   }
 }
 
+/** Blocked by an admin (inactive but not deleted). The client signs these out on a 403 "blocked". */
+export async function isBlocked(db: ReturnType<typeof getServiceClient>, userId: string) {
+  const { data: me } = await db.from('users').select('is_active, is_deleted').eq('id', userId).single();
+  return !!me && (me.is_active === 0 || me.is_active === false) && !me.is_deleted;
+}
+
 /**
  * Get the app user record from our DB given a Supabase auth user ID.
  * Uses the service client so RLS doesn't block it.
