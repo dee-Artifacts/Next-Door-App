@@ -111,7 +111,7 @@ export default function ChatLayout({ groupId, eventName, eventId, onBackToMain, 
   const live = useRealtime(isMainChat ? "main" : null, (signal) => mainSignalRef.current(signal));
 
   // The user list changes rarely (online status flips at sign-in/out), so slower while live
-  const { users, refetch: refetchUsers } = useUsers(live ? 5 * 60_000 : 30_000);
+  const { users, refetch: refetchUsers } = useUsers(live ? 5 * 60_000 : 30_000, { catchUpOnReturn: !live });
   // Header counts every 30s; while idle, one combined check (counts + message changes) every 5 min
   const { unreadCount, notificationCount, refetchCounts, refresh: refreshChat } = useChatSync({
     chat: isMainChat ? "main" : undefined,
@@ -128,7 +128,7 @@ export default function ChatLayout({ groupId, eventName, eventId, onBackToMain, 
       return;
     }
     if (signal.event !== "typing") {
-      refreshOnSignal(); // changed, counts
+      refreshOnSignal(); // changed, counts, resumed (back from a long-hidden tab)
       return;
     }
     const typingId = String(signal.payload.user_id ?? "");
@@ -196,11 +196,11 @@ export default function ChatLayout({ groupId, eventName, eventId, onBackToMain, 
   }, []);
 
   // Poll for new messages (and who is typing) every 5 seconds, unless Realtime is live
-  usePolling(refetch, live ? null : 5000);
+  usePolling(refetch, live ? null : 5000, { fallback: true });
 
   // Pinned messages change rarely; they are also refetched after pin/unpin and sending,
   // and whenever the set of pinned messages in the chat changes (e.g. another admin pins)
-  usePolling(fetchPinnedMessages, live ? null : 60_000);
+  usePolling(fetchPinnedMessages, live ? null : 60_000, { fallback: true });
   const pinnedKey = messages.filter((m) => "is_pinned" in m && m.is_pinned).map((m) => m.id).join(",");
   const pinnedKeyRef = useRef<string | null>(null);
   useEffect(() => {

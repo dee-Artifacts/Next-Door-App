@@ -12,8 +12,11 @@
  *     (supabase-js returns the same channel for the same topic name).
  *   - Channels join with the user's current access token, and every token
  *     refresh is passed on (realtime.setAuth), so they don't drop after an hour.
- *   - A tab hidden for a minute leaves its channels; it rejoins when visible
- *     again and the chats catch up with one fetch.
+ *   - A tab hidden for a minute leaves its channels. Its live topics wait as
+ *     'resuming' (still counted as live, so nothing polls): back in view they
+ *     get a few seconds to rejoin, then send listeners a 'resumed' signal for
+ *     one catch-up fetch. Any that don't make it go 'down' and the chat falls
+ *     back to polling.
  *   - CHANNEL_ERROR / TIMED_OUT: supabase-js retries the join itself. CLOSED
  *     while still wanted: rejoin after a short pause.
  *
@@ -25,7 +28,7 @@ import type { RealtimeChannel } from '@supabase/supabase-js';
 import { createClient } from './supabase/client';
 import { subscribeActivity } from './activity';
 
-export type RealtimeStatus = 'connecting' | 'live' | 'down';
+export type RealtimeStatus = 'connecting' | 'live' | 'resuming' | 'down';
 export interface Signal {
   event: string;
   payload: Record<string, unknown>;
@@ -52,6 +55,7 @@ let hiddenLeft = false;
 const LEAVE_DELAY_MS = 1000;
 const HIDDEN_LEAVE_AFTER_MS = 60_000;
 const REJOIN_AFTER_CLOSE_MS = 5000;
+export const RESUME_GRACE_MS = 3000;
 
 // ── Debug ────────────────────────────────────────────────────────────────────
 
@@ -136,7 +140,7 @@ function dropChannel(name: string, t: Topic, status: RealtimeStatus) {
 
 function join(name: string, t: Topic) {
   if (t.channel) return;
-  setStatus(name, t, 'connecting');
+  if (t.status !== 'resuming') setStatus(name, t, 'connecting');
 
   void ensureAuth().then((ok) => {
     // Left, hidden or already joined while waiting for the token
@@ -156,7 +160,9 @@ function join(name: string, t: Topic) {
       if (t.channel !== channel) return; // an old channel we already dropped
       if (err) log(name, state, err.message);
       if (state === 'SUBSCRIBED') {
+        const resumed = t.status === 'resuming';
         setStatus(name, t, 'live');
+        if (resumed) t.signals.forEach((listener) => listener({ event: 'resumed', payload: {} }));
       } else {
         setStatus(name, t, 'down');
         if (state === 'CLOSED' && t.signals.size > 0 && !t.rejoinTimer) {
@@ -214,6 +220,12 @@ export function listen(name: string, onSignal: SignalListener, onStatus: StatusL
 
 let visibilityReady = false;
 let hiddenTimer: ReturnType<typeof setTimeout> | null = null;
+let resumeTimer: ReturnType<typeof setTimeout> | null = null;
+
+/** True while a tab that left its channels is (or is about to be) rejoining them. */
+export function isResuming() {
+  return hiddenLeft || resumeTimer !== null;
+}
 
 function initVisibility() {
   if (visibilityReady || typeof document === 'undefined') return;
@@ -225,7 +237,7 @@ function initVisibility() {
         hiddenTimer = null;
         hiddenLeft = true;
         log('tab hidden for a minute → leaving channels');
-        topics.forEach((t, name) => dropChannel(name, t, 'down'));
+        topics.forEach((t, name) => dropChannel(name, t, t.status === 'live' ? 'resuming' : 'down'));
       }, HIDDEN_LEAVE_AFTER_MS);
       return;
     }
@@ -237,6 +249,13 @@ function initVisibility() {
       hiddenLeft = false;
       log('tab visible again → rejoining channels');
       topics.forEach((t, name) => join(name, t));
+      if (resumeTimer) clearTimeout(resumeTimer);
+      resumeTimer = setTimeout(() => {
+        resumeTimer = null;
+        topics.forEach((t, name) => {
+          if (t.status === 'resuming') setStatus(name, t, 'down'); // not back in time: poll
+        });
+      }, RESUME_GRACE_MS);
     }
   });
 }

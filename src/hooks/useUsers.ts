@@ -16,8 +16,11 @@ export interface User {
   is_deleted?: number;
 }
 
-/** The user list, refreshed every `intervalMs` (30s, or slower while Realtime is live). */
-export function useUsers(intervalMs = 30_000) {
+/**
+ * The user list, refreshed every `intervalMs` (30s, or slower while Realtime
+ * is live, when `catchUpOnReturn` is false too: no extra fetch on return).
+ */
+export function useUsers(intervalMs = 30_000, { catchUpOnReturn = true } = {}) {
   const [users, setUsers] = useState<User[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -43,7 +46,7 @@ export function useUsers(intervalMs = 30_000) {
   }, []);
 
   // Poll for user status updates
-  usePolling(fetchUsers, intervalMs);
+  usePolling(fetchUsers, intervalMs, { catchUpOnReturn });
 
   return {
     users,

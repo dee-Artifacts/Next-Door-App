@@ -11,6 +11,7 @@ import {
 const COLORS: Record<RealtimeStatus, string> = {
   live: "#16a34a",
   connecting: "#d97706",
+  resuming: "#d97706",
   down: "#dc2626",
 };
 

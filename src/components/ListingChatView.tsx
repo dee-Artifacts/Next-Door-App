@@ -117,12 +117,13 @@ export default function ListingChatView({ listingId, onBack }: ListingChatViewPr
   const refreshMembersOnSignal = useSignalRefresh(() => fetchMembers(), false);
   const live = useRealtime(`listing:${listingId}`, (signal) => {
     if (signal.event === "members") return refreshMembersOnSignal();
+    if (signal.event === "resumed") refreshMembersOnSignal(); // back from a long-hidden tab: both
     if (signal.event === "read") {
       // Someone else's read receipts: soon is enough (my own reads change nothing here)
       if (readBySomeoneElse(signal, user?.id)) refreshMessagesOnSignal(READ_RECEIPT_DELAY_MS);
       return;
     }
-    if (signal.event !== "typing") return refreshMessagesOnSignal(); // changed
+    if (signal.event !== "typing") return refreshMessagesOnSignal(); // changed, resumed
     const typingId = String(signal.payload.user_id ?? "");
     if (!typingId || typingId === user?.id) return;
     const typist = members.find((m) => m.user_id === typingId);
@@ -135,7 +136,7 @@ export default function ListingChatView({ listingId, onBack }: ListingChatViewPr
   }, [live, refreshMessagesOnSignal]);
 
   // Poll messages (and who is typing) every 5 seconds
-  usePolling(fetchMessages, live ? null : 5000);
+  usePolling(fetchMessages, live ? null : 5000, { fallback: true });
 
   // Fetch members
   const fetchMembers = async () => {
@@ -156,7 +157,7 @@ export default function ListingChatView({ listingId, onBack }: ListingChatViewPr
     fetchMembers();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [listingId]);
-  usePolling(fetchMembers, live ? null : 30_000);
+  usePolling(fetchMembers, live ? null : 30_000, { fallback: true });
   // While idle: one check for message changes every 5 minutes instead of the polls above
   useChatSync({ chat: `listing:${listingId}`, cursor: messageCursor, live });
 

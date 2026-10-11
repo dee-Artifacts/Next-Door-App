@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { listen, type Signal } from "@/src/lib/realtime";
+import { isResuming, listen, RESUME_GRACE_MS, type Signal } from "@/src/lib/realtime";
 import { getActivityState, subscribeActivity } from "@/src/lib/activity";
 import { isSessionEnded } from "@/src/lib/session-guard";
 
 /**
  * Listen on a Realtime topic (see src/lib/realtime) while mounted; null
- * listens to nothing. Returns true while the channel is SUBSCRIBED: pollers
- * stand down then, and resume as soon as it is not.
+ * listens to nothing. Returns true while the channel is SUBSCRIBED (or
+ * resuming after a long-hidden tab): pollers stand down then, and resume as
+ * soon as it is not.
  */
 export function useRealtime(topic: string | null, onSignal: (signal: Signal) => void): boolean {
   const [live, setLive] = useState(false);
@@ -21,7 +22,7 @@ export function useRealtime(topic: string | null, onSignal: (signal: Signal) => 
     return listen(
       topic,
       (signal) => onSignalRef.current(signal),
-      (status) => setLive(status === "live")
+      (status) => setLive(status === "live" || status === "resuming")
     );
   }, [topic]);
 
@@ -45,8 +46,10 @@ export function readBySomeoneElse(signal: Signal, myId: string | undefined) {
  * now (300ms by default) and never two at a time: a burst of signals, or a
  * slow signal waiting when a quick one comes in, costs one refresh. While the
  * tab is hidden it only notes that something changed and refreshes when the
- * tab is visible again. Also refreshes once whenever `live` turns true: the
- * catch-up for anything missed while the channel was down.
+ * tab is visible again (waiting for the channels to rejoin if the tab left
+ * them: their 'resumed' signal brings the refresh forward). Also refreshes
+ * once whenever `live` turns true: the catch-up for anything missed while the
+ * channel was down.
  */
 export function useSignalRefresh(refresh: () => unknown, live: boolean) {
   const refreshRef = useRef(refresh);
@@ -104,7 +107,7 @@ export function useSignalRefresh(refresh: () => unknown, live: boolean) {
         const s = state.current;
         if (next !== "hidden" && s.dirty) {
           s.dirty = false;
-          trigger();
+          trigger(isResuming() ? RESUME_GRACE_MS : undefined);
         }
       }),
     [trigger]

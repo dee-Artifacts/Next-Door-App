@@ -162,12 +162,13 @@ export default function EventChatView({ eventId, eventName, onBack }: EventChatV
   const refreshMembersOnSignal = useSignalRefresh(() => Promise.all([fetchMembers(), fetchEventDetails()]), false);
   const live = useRealtime(`event:${eventId}`, (signal) => {
     if (signal.event === "members") return refreshMembersOnSignal();
+    if (signal.event === "resumed") refreshMembersOnSignal(); // back from a long-hidden tab: both
     if (signal.event === "read") {
       // Someone else's read receipts: soon is enough (my own reads change nothing here)
       if (readBySomeoneElse(signal, user?.id)) refreshMessagesOnSignal(READ_RECEIPT_DELAY_MS);
       return;
     }
-    if (signal.event !== "typing") return refreshMessagesOnSignal(); // changed
+    if (signal.event !== "typing") return refreshMessagesOnSignal(); // changed, resumed
     const typingId = String(signal.payload.user_id ?? "");
     if (!typingId || typingId === user?.id) return;
     const typist = members.find((m) => m.user_id === typingId);
@@ -180,8 +181,8 @@ export default function EventChatView({ eventId, eventName, onBack }: EventChatV
   }, [live, refreshMessagesOnSignal]);
 
   // Poll messages (and who is typing) every 5 seconds; details and members change rarely
-  usePolling(() => fetchMessages(), live ? null : 5000);
-  usePolling(() => Promise.all([fetchMembers(), fetchEventDetails()]), live ? null : 30_000);
+  usePolling(() => fetchMessages(), live ? null : 5000, { fallback: true });
+  usePolling(() => Promise.all([fetchMembers(), fetchEventDetails()]), live ? null : 30_000, { fallback: true });
   // While idle: one check for message changes every 5 minutes instead of the polls above
   useChatSync({ chat: `event:${eventId}`, cursor: messageCursor, live });
 

@@ -25,8 +25,8 @@ interface UseChatSyncOptions<M extends MessageLike> {
  *   - idle tab (no input for 5 min): ONE request every 5 minutes that returns
  *     both the counts and what changed in `chat`; nothing else polls
  *   - hidden tab: nothing
- *   - Realtime live (`live`): only a check every 10 minutes; the chat calls
- *     `refresh` when a signal arrives
+ *   - Realtime live (`live`): only a check every 10 minutes, none on return;
+ *     the chat calls `refresh` when a signal arrives
  * Any input brings every poller back to its normal rate with an immediate catch-up.
  */
 export function useChatSync<M extends MessageLike>({
@@ -73,7 +73,11 @@ export function useChatSync<M extends MessageLike>({
   usePolling(
     (mode) => (live || mode === "idle" ? sync(true) : fetchCounts()),
     live ? LIVE_CHECK_INTERVAL_MS : withCounts ? 30_000 : null,
-    { enabled: withCounts || !!chat, idleIntervalMs: live ? LIVE_CHECK_INTERVAL_MS : IDLE_SYNC_INTERVAL_MS }
+    {
+      enabled: withCounts || !!chat,
+      idleIntervalMs: live ? LIVE_CHECK_INTERVAL_MS : IDLE_SYNC_INTERVAL_MS,
+      catchUpOnReturn: !live,
+    }
   );
 
   /** Counts plus what changed in `chat`, in one request (answers a Realtime signal). */
