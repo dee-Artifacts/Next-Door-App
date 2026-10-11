@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useAuth } from "@/src/lib/auth-hook";
 import { useRouter } from "next/navigation";
 import MessageList from "@/src/components/MessageList";
@@ -15,6 +15,8 @@ import { useUsers } from "@/src/hooks/useUsers";
 import { useChatSync } from "@/src/hooks/useChatSync";
 import { useTypingStatus } from "@/src/hooks/useTypingStatus";
 import { usePolling } from "@/src/hooks/usePolling";
+import { useRealtime, useSignalRefresh } from "@/src/hooks/useRealtime";
+import type { Signal } from "@/src/lib/realtime";
 import { handleBlockedAccount, stopIfDenied } from "@/src/lib/session-guard";
 import { useToast } from "@/src/context/ToastContext";
 import NotificationPanel from "@/src/components/NotificationPanel";
@@ -83,7 +85,7 @@ export default function ChatLayout({ groupId, eventName, eventId, onBackToMain, 
   const [optimisticMessages, setOptimisticMessages] = useState<OptimisticMessage[]>([]);
   const [showOnboarding, setShowOnboarding] = useState(false);
   
-  const { typingUsers, updateTypingUsers, sendTypingStatus } = useTypingStatus({ groupType: "main" });
+  const { typingUsers, updateTypingUsers, addTypingUser, sendTypingStatus } = useTypingStatus({ groupType: "main" });
   const { messages: rawMessages, cursor: messageCursor, lastReadMessageId, isLoading, hasInitiallyLoaded, refetch } = useMessages(groupId || null, { onTypingUsers: updateTypingUsers });
   
   // Ensure messages is always an array to prevent .map() errors
@@ -102,13 +104,37 @@ export default function ChatLayout({ groupId, eventName, eventId, onBackToMain, 
       })
     );
   }, [messages]);
-  const { users } = useUsers();
+  // Realtime: while the main chat's topic is live, signals replace the polls below
+  // (messages, typing, counts, pinned); they resume whenever it is not.
+  const isMainChat = groupId === "main" || !groupId;
+  const mainSignalRef = useRef<(signal: Signal) => void>(() => {});
+  const live = useRealtime(isMainChat ? "main" : null, (signal) => mainSignalRef.current(signal));
+
+  // The user list changes rarely (online status flips at sign-in/out), so slower while live
+  const { users, refetch: refetchUsers } = useUsers(live ? 5 * 60_000 : 30_000);
   // Header counts every 30s; while idle, one combined check (counts + message changes) every 5 min
-  const { unreadCount, notificationCount, refetchCounts } = useChatSync({
-    chat: groupId === "main" || !groupId ? "main" : undefined,
+  const { unreadCount, notificationCount, refetchCounts, refresh: refreshChat } = useChatSync({
+    chat: isMainChat ? "main" : undefined,
     cursor: messageCursor,
     withCounts: true,
+    live,
   });
+  // One /api/sync (counts + message changes) per burst of signals
+  const refreshOnSignal = useSignalRefresh(refreshChat, live);
+  mainSignalRef.current = (signal) => {
+    if (signal.event !== "typing") {
+      refreshOnSignal(); // changed, read, counts
+      return;
+    }
+    const typingId = String(signal.payload.user_id ?? "");
+    if (!typingId || typingId === user?.id) return;
+    const typist = users.find((u) => u.id === typingId);
+    if (typist) {
+      addTypingUser({ user_id: typist.id, name: typist.name || "Someone", avatar_url: typist.avatar_url, room_number: typist.room_number });
+    } else {
+      refetchUsers(); // someone new: known by their next ping
+    }
+  };
   const { showToast } = useToast();
 
   useEffect(() => {
@@ -164,11 +190,20 @@ export default function ChatLayout({ groupId, eventName, eventId, onBackToMain, 
     fetchPinnedMessages();
   }, []);
 
-  // Poll for new messages (and who is typing) every 5 seconds
-  usePolling(refetch, 5000);
+  // Poll for new messages (and who is typing) every 5 seconds, unless Realtime is live
+  usePolling(refetch, live ? null : 5000);
 
-  // Pinned messages change rarely; they are also refetched after pin/unpin and sending
-  usePolling(fetchPinnedMessages, 60_000);
+  // Pinned messages change rarely; they are also refetched after pin/unpin and sending,
+  // and whenever the set of pinned messages in the chat changes (e.g. another admin pins)
+  usePolling(fetchPinnedMessages, live ? null : 60_000);
+  const pinnedKey = messages.filter((m) => "is_pinned" in m && m.is_pinned).map((m) => m.id).join(",");
+  const pinnedKeyRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!hasInitiallyLoaded) return;
+    if (pinnedKeyRef.current !== null && pinnedKeyRef.current !== pinnedKey) fetchPinnedMessages();
+    pinnedKeyRef.current = pinnedKey;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pinnedKey, hasInitiallyLoaded]);
 
   // Send heartbeat every 60 seconds to update online status (online = seen in the last 2 min).
   // It also reports is_active: a blocked account is signed out and sent to /blocked.
@@ -189,6 +224,12 @@ export default function ChatLayout({ groupId, eventName, eventId, onBackToMain, 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   usePolling(sendHeartbeat, 60_000);
+
+  // This user's own topic: new mentions/replies, and the account being blocked or deleted
+  useRealtime(user ? `user:${user.id}` : null, (signal) => {
+    if (signal.event === "notify") refetchCounts();
+    else if (signal.event === "account") sendHeartbeat();
+  });
 
   // Close reaction bar on scroll
   useEffect(() => {

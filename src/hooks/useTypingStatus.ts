@@ -13,10 +13,14 @@ interface UseTypingStatusOptions {
   enabled?: boolean;
 }
 
+// Matches the server's typing window (src/lib/typing.ts): senders re-send every 3s
+const TYPING_SHOWN_FOR_MS = 8000;
+
 /**
- * Typing indicator state. Who is typing comes back with each chat messages poll
- * (`typing_users` in the response) and is passed to `updateTypingUsers`; this
- * hook no longer polls on its own.
+ * Typing indicator state, from either source:
+ *   - polling: `typing_users` in each chat messages response → updateTypingUsers
+ *   - Realtime: a "typing" signal per ping → addTypingUser, shown for 8s
+ * This hook does not poll on its own.
  */
 export function useTypingStatus({ groupType, groupId, enabled = true }: UseTypingStatusOptions) {
   const [typingUsers, setTypingUsers] = useState<TypingUser[]>([]);
@@ -41,6 +45,20 @@ export function useTypingStatus({ groupType, groupId, enabled = true }: UseTypin
   useEffect(() => {
     if (!enabled) updateTypingUsers([]);
   }, [enabled, updateTypingUsers]);
+
+  // Realtime typing pings: each keeps its user shown for TYPING_SHOWN_FOR_MS
+  const signalledRef = useRef(new Map<string, { user: TypingUser; timer: ReturnType<typeof setTimeout> }>());
+  const addTypingUser = useCallback((user: TypingUser) => {
+    const signalled = signalledRef.current;
+    const previous = signalled.get(user.user_id);
+    if (previous) clearTimeout(previous.timer);
+    const timer = setTimeout(() => {
+      signalled.delete(user.user_id);
+      updateTypingUsers(Array.from(signalled.values(), (e) => e.user));
+    }, TYPING_SHOWN_FOR_MS);
+    signalled.set(user.user_id, { user, timer });
+    updateTypingUsers(Array.from(signalled.values(), (e) => e.user));
+  }, [updateTypingUsers]);
 
   // Send typing status (debounced - max once per 3 seconds)
   const sendTypingStatus = useCallback(async () => {
@@ -78,18 +96,21 @@ export function useTypingStatus({ groupType, groupId, enabled = true }: UseTypin
     }
   }, [groupType, groupId, enabled]);
 
-  // Cleanup timeout on unmount
+  // Cleanup timeouts on unmount
   useEffect(() => {
+    const signalled = signalledRef.current;
     return () => {
       if (debounceTimeoutRef.current) {
         clearTimeout(debounceTimeoutRef.current);
       }
+      signalled.forEach((e) => clearTimeout(e.timer));
     };
   }, []);
 
   return {
     typingUsers: enabled ? typingUsers : [],
     updateTypingUsers,
+    addTypingUser,
     sendTypingStatus,
   };
 }

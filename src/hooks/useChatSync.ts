@@ -4,6 +4,9 @@ import { stopIfDenied } from "@/src/lib/session-guard";
 import type { MessageCursor, MessageLike } from "@/src/hooks/useMessageCursor";
 
 export const IDLE_SYNC_INTERVAL_MS = 5 * 60 * 1000;
+// While Realtime is live: a safety check for what sends no signal (reminders
+// and announcements expiring, events ending) or a signal that got lost.
+export const LIVE_CHECK_INTERVAL_MS = 10 * 60 * 1000;
 
 interface UseChatSyncOptions<M extends MessageLike> {
   /** Which chat to check for changes while idle: "main", "event:<id>" or "listing:<id>". */
@@ -12,6 +15,8 @@ interface UseChatSyncOptions<M extends MessageLike> {
   cursor?: MessageCursor<M>;
   /** Poll the header badge counts every 30s while active (main chat only). */
   withCounts?: boolean;
+  /** The chat's Realtime topic is live: no polling except a 10-minute safety check. */
+  live?: boolean;
 }
 
 /**
@@ -20,12 +25,15 @@ interface UseChatSyncOptions<M extends MessageLike> {
  *   - idle tab (no input for 5 min): ONE request every 5 minutes that returns
  *     both the counts and what changed in `chat`; nothing else polls
  *   - hidden tab: nothing
+ *   - Realtime live (`live`): only a check every 10 minutes; the chat calls
+ *     `refresh` when a signal arrives
  * Any input brings every poller back to its normal rate with an immediate catch-up.
  */
 export function useChatSync<M extends MessageLike>({
   chat,
   cursor,
   withCounts = false,
+  live = false,
 }: UseChatSyncOptions<M> = {}) {
   const [unreadCount, setUnreadCount] = useState(0);
   const [mentionCount, setMentionCount] = useState(0);
@@ -63,10 +71,13 @@ export function useChatSync<M extends MessageLike>({
   }, [withCounts, fetchCounts]);
 
   usePolling(
-    (mode) => (mode === "idle" ? sync(true) : fetchCounts()),
-    withCounts ? 30_000 : null,
-    { enabled: withCounts || !!chat, idleIntervalMs: IDLE_SYNC_INTERVAL_MS }
+    (mode) => (live || mode === "idle" ? sync(true) : fetchCounts()),
+    live ? LIVE_CHECK_INTERVAL_MS : withCounts ? 30_000 : null,
+    { enabled: withCounts || !!chat, idleIntervalMs: live ? LIVE_CHECK_INTERVAL_MS : IDLE_SYNC_INTERVAL_MS }
   );
+
+  /** Counts plus what changed in `chat`, in one request (answers a Realtime signal). */
+  const refresh = useCallback(() => sync(true), [sync]);
 
   // Bell total: mentions + admin reminders + an "unread messages" entry (1 if any)
   const notificationCount = mentionCount + reminderCount + (unreadCount > 0 ? 1 : 0);
@@ -75,5 +86,6 @@ export function useChatSync<M extends MessageLike>({
     unreadCount,
     notificationCount,
     refetchCounts: fetchCounts,
+    refresh,
   };
 }

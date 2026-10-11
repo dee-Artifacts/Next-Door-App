@@ -16,7 +16,8 @@ export interface User {
   is_deleted?: number;
 }
 
-export function useUsers() {
+/** The user list, refreshed every `intervalMs` (30s, or slower while Realtime is live). */
+export function useUsers(intervalMs = 30_000) {
   const [users, setUsers] = useState<User[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -41,8 +42,8 @@ export function useUsers() {
     fetchUsers();
   }, []);
 
-  // Poll for user status updates every 30 seconds
-  usePolling(fetchUsers, 30_000);
+  // Poll for user status updates
+  usePolling(fetchUsers, intervalMs);
 
   return {
     users,
