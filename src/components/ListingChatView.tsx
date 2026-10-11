@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { usePolling } from "@/src/hooks/usePolling";
+import { useRealtime, useSignalRefresh } from "@/src/hooks/useRealtime";
 import { useChatSync } from "@/src/hooks/useChatSync";
 import { useMessageCursor } from "@/src/hooks/useMessageCursor";
 import { stopIfDenied } from "@/src/lib/session-guard";
@@ -68,7 +69,7 @@ export default function ListingChatView({ listingId, onBack }: ListingChatViewPr
   const [selectedHelpers, setSelectedHelpers] = useState<string[]>([]);
 
   const messageListRef = useRef<ListingMessageListRef>(null);
-  const { typingUsers, updateTypingUsers, sendTypingStatus } = useTypingStatus({ groupType: "listing", groupId: String(listingId) });
+  const { typingUsers, updateTypingUsers, addTypingUser, sendTypingStatus } = useTypingStatus({ groupType: "listing", groupId: String(listingId) });
 
   // Fetch listing details
   useEffect(() => {
@@ -111,8 +112,25 @@ export default function ListingChatView({ listingId, onBack }: ListingChatViewPr
     fetchMessages();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [listingId]);
+  // Realtime: while listing:<id> is live, signals replace the polls here; they resume when it is not
+  const refreshMessagesOnSignal = useSignalRefresh(() => fetchMessages(), false);
+  const refreshMembersOnSignal = useSignalRefresh(() => fetchMembers(), false);
+  const live = useRealtime(`listing:${listingId}`, (signal) => {
+    if (signal.event === "members") return refreshMembersOnSignal();
+    if (signal.event !== "typing") return refreshMessagesOnSignal(); // changed, read
+    const typingId = String(signal.payload.user_id ?? "");
+    if (!typingId || typingId === user?.id) return;
+    const typist = members.find((m) => m.user_id === typingId);
+    if (typist) addTypingUser(typist);
+    else refreshMessagesOnSignal(); // not in the member list yet: the fetch returns who is typing
+  });
+  // One catch-up fetch each time the topic goes live
+  useEffect(() => {
+    if (live) refreshMessagesOnSignal();
+  }, [live, refreshMessagesOnSignal]);
+
   // Poll messages (and who is typing) every 5 seconds
-  usePolling(fetchMessages, 5000);
+  usePolling(fetchMessages, live ? null : 5000);
 
   // Fetch members
   const fetchMembers = async () => {
@@ -133,9 +151,9 @@ export default function ListingChatView({ listingId, onBack }: ListingChatViewPr
     fetchMembers();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [listingId]);
-  usePolling(fetchMembers, 30_000);
+  usePolling(fetchMembers, live ? null : 30_000);
   // While idle: one check for message changes every 5 minutes instead of the polls above
-  useChatSync({ chat: `listing:${listingId}`, cursor: messageCursor });
+  useChatSync({ chat: `listing:${listingId}`, cursor: messageCursor, live });
 
   // Remove optimistic messages when confirmed
   useEffect(() => {
