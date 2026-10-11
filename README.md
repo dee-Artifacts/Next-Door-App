@@ -205,10 +205,10 @@ These keep the app tidy. Create three jobs at [cron-job.org](https://cron-job.or
 | Job | URL | Schedule | Method |
 |---|---|---|---|
 | Cleanup | `https://your-domain.com/api/cron/cleanup` | Once a month (re-run if `done` is `false`) | POST |
-| Email digest | `https://your-domain.com/api/cron` | Every 15 min | POST |
+| Email digest | `https://your-domain.com/api/cron` | Daily, 1 min after the send time (Europe/London) | POST |
 | Purge guests | `https://your-domain.com/api/cron/purge-guests` | Once a month (re-run if `done` is `false`) | POST |
 
-The email digest handler checks the admin schedule internally, so running it every 15 minutes is safe. Purge guests removes Guest Access accounts older than `GUEST_TTL_HOURS` (default 24).
+The email digest handler checks the admin schedule internally: it sends on configured days within 15 minutes after the send time, once per day, so one daily call at the send time is enough (keep the two in step if you change the send time). Purge guests removes Guest Access accounts older than `GUEST_TTL_HOURS` (default 24).
 
 ---
 

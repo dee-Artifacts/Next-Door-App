@@ -63,10 +63,10 @@ runs ten minutes apart on the same day, e.g. `0,10,20 2 7 * *`).
 | Field | Value |
 |---|---|
 | URL | `https://nextdoor.deeproduct.org/api/cron` |
-| Schedule | Every 15 minutes |
+| Schedule | Once a day, 1 minute after the configured send time, in the Europe/London time zone (e.g. `1 9 * * *` for 09:00) |
 | Method | POST |
 
-The handler runs a smart schedule check, so it only sends when the current UK day and time match the configured schedule and the email has not already gone out today.
+The handler runs a smart schedule check, so it only sends on a configured send day, within 15 minutes after the configured UK send time, and if the email has not already gone out today. One call a day is enough; calling a minute after the send time leaves room for clock differences. If you change the send time in Admin Settings, change this schedule too. Optionally add a second call a few minutes later as a retry: it does nothing if the first one sent.
 
 Configure the schedule in Admin Settings, Email Notifications, Send Schedule.
 
