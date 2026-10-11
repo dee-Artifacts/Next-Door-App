@@ -1,7 +1,7 @@
 import { ImageResponse } from "next/og";
 
 // Social share card (LinkedIn, X/Twitter, WhatsApp, Slack, Discord, iMessage, etc.)
-export const runtime = "edge";
+// Rendered once at build time (no runtime export), so crawlers get a static PNG.
 export const alt =
   "Next Door, an open-source, self-hosted neighbourhood community app";
 export const size = { width: 1200, height: 630 };

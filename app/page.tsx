@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useRef } from "react";
 import { useAuth } from "@/src/lib/auth-hook";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
   MessageSquare,
@@ -219,7 +219,6 @@ function CtaPair({
 export default function HomePage() {
   const { user, isPending, redirectToLogin, redirectToGuestLogin } = useAuth();
   const router = useRouter();
-  const searchParams = useSearchParams();
 
   // Component states
   const [activeFaq, setActiveFaq] = useState<number | null>(null);
@@ -240,13 +239,14 @@ export default function HomePage() {
     return () => document.removeEventListener("mousedown", handler);
   }, [signInMenuOpen]);
 
-  // Handle Supabase manual code forwarding
+  // Handle Supabase manual code forwarding. Read from window.location rather
+  // than useSearchParams so this page can be prerendered as static HTML.
   useEffect(() => {
-    const code = searchParams.get('code');
+    const code = new URLSearchParams(window.location.search).get('code');
     if (code) {
       router.replace(`/auth/callback?code=${encodeURIComponent(code)}`);
     }
-  }, [searchParams, router]);
+  }, [router]);
 
   // Handle redirect if user is logged in
   useEffect(() => {

@@ -68,10 +68,12 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  // Pages only. API routes authenticate themselves (authenticate() refreshes the
+  // App pages only. API routes authenticate themselves (authenticate() refreshes the
   // session cookie too, or the cron secret), so running getUser() here as well
-  // doubled the Auth round trips on every API call.
+  // doubled the Auth round trips on every API call. The public pages (home,
+  // privacy, terms, contact, cookies, robots, sitemap, share images) are static
+  // files and need no session, so they skip middleware and run no code at all.
   matcher: [
-    '/((?!api/|_next/static|_next/image|favicon\\.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
+    '/((?!$|api/|_next/static|_next/image|favicon\\.ico|(?:privacy|terms|contact|cookies)$|robots\\.txt$|sitemap\\.xml$|opengraph-image|twitter-image|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
   ],
 }

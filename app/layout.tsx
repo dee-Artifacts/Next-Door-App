@@ -5,8 +5,6 @@ import { ThemeProvider } from "@/src/context/ThemeContext";
 import { ToastProvider } from "@/src/context/ToastContext";
 import UmamiAnalytics from "@/src/components/UmamiAnalytics";
 
-export const dynamic = 'force-dynamic';
-
 const SITE_URL = "https://nextdoor.deeproduct.org";
 const SITE_DESCRIPTION =
   "Next Door is a free, open-source, self-hosted community app for your street, building, or local group: real-time chat, events, and a private marketplace, with no ads, no tracking, and your data staying yours.";
