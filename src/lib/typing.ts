@@ -11,19 +11,26 @@ const TYPING_WINDOW_MS = 8000;
 export async function getTypingUsers(db: Db, userId: string, groupType: string, groupId: string | null) {
   const cutoff = new Date(Date.now() - TYPING_WINDOW_MS).toISOString();
 
+  // Two plain queries: the live DB has no FK for an embedded users join
   let query = db
     .from('typing_status')
-    .select('user_id, users!typing_status_user_id_fkey(name, avatar_url, room_number)')
+    .select('user_id')
     .eq('group_type', groupType)
     .neq('user_id', userId)
     .gt('last_typed_at', cutoff);
 
   query = groupId ? query.eq('group_id', groupId) : query.is('group_id', null);
 
-  const { data } = await query;
+  const { data: rows } = await query;
+  if (!rows?.length) return [];
 
-  return (data || []).map((row: Record<string, unknown>) => {
-    const u = row.users as Record<string, unknown> | null;
-    return { user_id: row.user_id as string, name: u?.name as string, avatar_url: (u?.avatar_url as string | null) ?? null, room_number: (u?.room_number as string | null) ?? null };
+  const userIds = Array.from(new Set(rows.map((row: { user_id: string }) => row.user_id)));
+  const { data: users } = await db.from('users').select('id, name, avatar_url, room_number').in('id', userIds);
+  const userMap: Record<string, Record<string, unknown>> = {};
+  for (const u of (users || []) as Record<string, unknown>[]) userMap[u.id as string] = u;
+
+  return userIds.map((id) => {
+    const u = userMap[id];
+    return { user_id: id, name: u?.name as string, avatar_url: (u?.avatar_url as string | null) ?? null, room_number: (u?.room_number as string | null) ?? null };
   });
 }
