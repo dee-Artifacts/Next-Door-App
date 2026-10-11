@@ -161,7 +161,8 @@ drop trigger if exists broadcast_change on public.listing_messages;
 create trigger broadcast_change after insert or update on public.listing_messages
   for each row execute function nextdoor_realtime.broadcast_message_change();
 
--- ── Read receipts: one signal per statement (mark-read is batched) ────────
+-- ── Read receipts: one signal per chat per statement (mark-read is batched).
+-- The payload lists who read, so a reader's own tabs can ignore it.
 create or replace function nextdoor_realtime.broadcast_reads()
 returns trigger
 language plpgsql
@@ -170,20 +171,22 @@ set search_path = ''
 as $$
 begin
   if tg_table_name = 'message_reads' then
-    if exists (select 1 from new_rows) then
-      perform nextdoor_realtime.send('{}'::jsonb, 'read', 'main');
-    end if;
+    perform nextdoor_realtime.send(jsonb_build_object('user_ids', c.user_ids), 'read', 'main')
+    from (select jsonb_agg(distinct n.user_id) as user_ids from new_rows n) c
+    where c.user_ids is not null;
   elsif tg_table_name = 'event_message_reads' then
-    perform nextdoor_realtime.send('{}'::jsonb, 'read', 'event:' || c.event_id)
+    perform nextdoor_realtime.send(jsonb_build_object('user_ids', c.user_ids), 'read', 'event:' || c.event_id)
     from (
-      select distinct m.event_id
+      select m.event_id, jsonb_agg(distinct n.user_id) as user_ids
       from new_rows n join public.event_messages m on m.id = n.event_message_id
+      group by m.event_id
     ) c;
   elsif tg_table_name = 'listing_message_reads' then
-    perform nextdoor_realtime.send('{}'::jsonb, 'read', 'listing:' || c.listing_id)
+    perform nextdoor_realtime.send(jsonb_build_object('user_ids', c.user_ids), 'read', 'listing:' || c.listing_id)
     from (
-      select distinct m.listing_id
+      select m.listing_id, jsonb_agg(distinct n.user_id) as user_ids
       from new_rows n join public.listing_messages m on m.id = n.listing_message_id
+      group by m.listing_id
     ) c;
   end if;
   return null;

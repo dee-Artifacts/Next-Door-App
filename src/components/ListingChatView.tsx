@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { usePolling } from "@/src/hooks/usePolling";
-import { useRealtime, useSignalRefresh } from "@/src/hooks/useRealtime";
+import { READ_RECEIPT_DELAY_MS, readBySomeoneElse, useRealtime, useSignalRefresh } from "@/src/hooks/useRealtime";
 import { useChatSync } from "@/src/hooks/useChatSync";
 import { useMessageCursor } from "@/src/hooks/useMessageCursor";
 import { stopIfDenied } from "@/src/lib/session-guard";
@@ -117,7 +117,12 @@ export default function ListingChatView({ listingId, onBack }: ListingChatViewPr
   const refreshMembersOnSignal = useSignalRefresh(() => fetchMembers(), false);
   const live = useRealtime(`listing:${listingId}`, (signal) => {
     if (signal.event === "members") return refreshMembersOnSignal();
-    if (signal.event !== "typing") return refreshMessagesOnSignal(); // changed, read
+    if (signal.event === "read") {
+      // Someone else's read receipts: soon is enough (my own reads change nothing here)
+      if (readBySomeoneElse(signal, user?.id)) refreshMessagesOnSignal(READ_RECEIPT_DELAY_MS);
+      return;
+    }
+    if (signal.event !== "typing") return refreshMessagesOnSignal(); // changed
     const typingId = String(signal.payload.user_id ?? "");
     if (!typingId || typingId === user?.id) return;
     const typist = members.find((m) => m.user_id === typingId);

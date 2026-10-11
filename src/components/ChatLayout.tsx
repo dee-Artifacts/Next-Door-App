@@ -15,7 +15,7 @@ import { useUsers } from "@/src/hooks/useUsers";
 import { useChatSync } from "@/src/hooks/useChatSync";
 import { useTypingStatus } from "@/src/hooks/useTypingStatus";
 import { usePolling } from "@/src/hooks/usePolling";
-import { useRealtime, useSignalRefresh } from "@/src/hooks/useRealtime";
+import { READ_RECEIPT_DELAY_MS, readBySomeoneElse, useRealtime, useSignalRefresh } from "@/src/hooks/useRealtime";
 import type { Signal } from "@/src/lib/realtime";
 import { handleBlockedAccount, stopIfDenied } from "@/src/lib/session-guard";
 import { useToast } from "@/src/context/ToastContext";
@@ -122,8 +122,13 @@ export default function ChatLayout({ groupId, eventName, eventId, onBackToMain, 
   // One /api/sync (counts + message changes) per burst of signals
   const refreshOnSignal = useSignalRefresh(refreshChat, live);
   mainSignalRef.current = (signal) => {
+    if (signal.event === "read") {
+      // Someone else's read receipts: soon is enough (my own reads change nothing here)
+      if (readBySomeoneElse(signal, user?.id)) refreshOnSignal(READ_RECEIPT_DELAY_MS);
+      return;
+    }
     if (signal.event !== "typing") {
-      refreshOnSignal(); // changed, read, counts
+      refreshOnSignal(); // changed, counts
       return;
     }
     const typingId = String(signal.payload.user_id ?? "");
