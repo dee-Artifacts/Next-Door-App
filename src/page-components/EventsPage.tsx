@@ -142,23 +142,18 @@ export default function EventsPage({ onGoToEventChat }: EventsPageProps) {
     }
   };
 
+  // One request for every event's unread count
   const fetchUnreadCounts = async (events: Event[]) => {
-    const counts: Record<number, number> = {};
-    for (const event of events) {
-      try {
-        const response = await fetch(`/api/events/${event.id}/messages/unread/count`, { credentials: "include" });
-        if (response.ok) {
-          const data = await response.json();
-          counts[event.id] = data.count || 0;
-        } else if (response.status === 401) {
-          // Session gone: stop here (one item's 403/404 shouldn't stop the others)
-          return stopIfDenied(response);
-        }
-      } catch (error) {
-        console.error(`Error fetching unread count for event ${event.id}:`, error);
-      }
+    if (events.length === 0) return;
+    try {
+      const ids = events.map((e) => e.id).join(",");
+      const response = await fetch(`/api/events/unread-counts?ids=${ids}`, { credentials: "include" });
+      if (!response.ok) return stopIfDenied(response);
+      const data = await response.json();
+      setEventUnreadCounts(data.counts || {});
+    } catch (error) {
+      console.error("Error fetching event unread counts:", error);
     }
-    setEventUnreadCounts(counts);
   };
 
   const handleJoinEvent = async (eventId: number) => {

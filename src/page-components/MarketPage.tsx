@@ -586,23 +586,18 @@ export default function MarketPage() {
   }, [activeTab, listings]);
   usePolling(() => fetchUnreadCounts(listings), 30_000, { enabled: pollUnreadCounts });
 
+  // One request for every listing's unread count
   const fetchUnreadCounts = async (listingsToFetch: MarketListing[]) => {
-    const counts: Record<number, number> = {};
-    for (const listing of listingsToFetch) {
-      try {
-        const response = await fetch(`/api/listings/${listing.id}/messages/unread/count`, { credentials: "include" });
-        if (response.ok) {
-          const data = await response.json();
-          counts[listing.id] = data.count || 0;
-        } else if (response.status === 401) {
-          // Session gone: stop here (one item's 403/404 shouldn't stop the others)
-          return stopIfDenied(response);
-        }
-      } catch (error) {
-        console.error(`Error fetching unread count for listing ${listing.id}:`, error);
-      }
+    if (listingsToFetch.length === 0) return;
+    try {
+      const ids = listingsToFetch.map((l) => l.id).join(",");
+      const response = await fetch(`/api/listings/unread-counts?ids=${ids}`, { credentials: "include" });
+      if (!response.ok) return stopIfDenied(response);
+      const data = await response.json();
+      setUnreadCounts(data.counts || {});
+    } catch (error) {
+      console.error("Error fetching listing unread counts:", error);
     }
-    setUnreadCounts(counts);
   };
 
   const fetchListings = async () => {
