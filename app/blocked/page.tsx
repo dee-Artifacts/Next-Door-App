@@ -1,27 +1,21 @@
 'use client';
 
-import { useEffect } from 'react';
 import { createClient } from '@/src/lib/supabase/client';
 import { useRouter } from 'next/navigation';
 
+// Always shows the message: blocked users arrive here already signed out
+// (session-guard signs out first; middleware clears the cookies).
 export default function BlockedPage() {
   const router = useRouter();
 
   const handleSignOut = async () => {
-    const supabase = createClient();
-    await supabase.auth.signOut();
+    try {
+      await createClient().auth.signOut();
+    } catch {
+      // Already signed out
+    }
     router.replace('/');
   };
-
-  useEffect(() => {
-    // If user somehow lands here without being blocked, let them through
-    const check = async () => {
-      const supabase = createClient();
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) { router.replace('/'); return; }
-    };
-    check();
-  }, [router]);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-light-bg via-slate-100 to-slate-50 dark:from-dark-ocean dark:via-dark-surface dark:to-dark-elevated flex items-center justify-center p-4">
