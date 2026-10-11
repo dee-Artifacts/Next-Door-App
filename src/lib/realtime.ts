@@ -19,6 +19,10 @@
  *     back to polling.
  *   - CHANNEL_ERROR / TIMED_OUT: supabase-js retries the join itself. CLOSED
  *     while still wanted: rejoin after a short pause.
+ *   - A topic refused 3 joins in a row (not a member, blocked, SQL not run)
+ *     stops trying and stays on polling until the next page load, tab return
+ *     or token refresh. Failures while the connection itself is down (offline)
+ *     don't count: those recover on their own.
  *
  * Debug: status changes are logged, and a small badge shows each topic's
  * state, in development or after localStorage.setItem('nd-debug-realtime', '1').
@@ -43,6 +47,10 @@ interface Topic {
   statuses: Set<StatusListener>;
   leaveTimer: ReturnType<typeof setTimeout> | null;
   rejoinTimer: ReturnType<typeof setTimeout> | null;
+  /** Joins refused (or timed out) in a row while connected */
+  failures: number;
+  /** Stopped retrying after MAX_JOIN_FAILURES; see retryGivenUp */
+  gaveUp: boolean;
 }
 
 const topics = new Map<string, Topic>();
@@ -56,6 +64,7 @@ const LEAVE_DELAY_MS = 1000;
 const HIDDEN_LEAVE_AFTER_MS = 60_000;
 const REJOIN_AFTER_CLOSE_MS = 5000;
 export const RESUME_GRACE_MS = 3000;
+const MAX_JOIN_FAILURES = 3;
 
 // ── Debug ────────────────────────────────────────────────────────────────────
 
@@ -108,7 +117,9 @@ function ensureAuth(): Promise<boolean> {
     supabase.auth.onAuthStateChange((event, session) => {
       if ((event === 'TOKEN_REFRESHED' || event === 'SIGNED_IN') && session?.access_token) {
         log('access token', event === 'TOKEN_REFRESHED' ? 'refreshed' : 'set', '→ updating channels');
-        authReady = supabase.realtime.setAuth(session.access_token).then(() => true);
+        const ready = supabase.realtime.setAuth(session.access_token).then(() => true);
+        authReady = ready;
+        void ready.then(() => retryGivenUp('new access token'));
       } else if (event === 'SIGNED_OUT') {
         authReady = null;
         topics.forEach((t, name) => dropChannel(name, t, 'down'));
@@ -138,6 +149,17 @@ function dropChannel(name: string, t: Topic, status: RealtimeStatus) {
   setStatus(name, t, status);
 }
 
+/** Topics that gave up get another 3 tries (tab return, token refresh). */
+function retryGivenUp(reason: string) {
+  topics.forEach((t, name) => {
+    if (!t.gaveUp) return;
+    t.gaveUp = false;
+    t.failures = 0;
+    log(name, reason, '→ trying again');
+    if (!hiddenLeft) join(name, t); // else joined when the tab is back
+  });
+}
+
 function join(name: string, t: Topic) {
   if (t.channel) return;
   if (t.status !== 'resuming') setStatus(name, t, 'connecting');
@@ -160,11 +182,22 @@ function join(name: string, t: Topic) {
       if (t.channel !== channel) return; // an old channel we already dropped
       if (err) log(name, state, err.message);
       if (state === 'SUBSCRIBED') {
+        t.failures = 0;
         const resumed = t.status === 'resuming';
         setStatus(name, t, 'live');
         if (resumed) t.signals.forEach((listener) => listener({ event: 'resumed', payload: {} }));
       } else {
         setStatus(name, t, 'down');
+        // Refused or unanswered while connected: give up after a few (offline doesn't count)
+        if ((state === 'CHANNEL_ERROR' || state === 'TIMED_OUT') && createClient().realtime.isConnected()) {
+          t.failures += 1;
+          if (t.failures >= MAX_JOIN_FAILURES) {
+            log(name, `join failed ${t.failures} times → polling until the next page load, tab return or token refresh`);
+            t.gaveUp = true;
+            dropChannel(name, t, 'down'); // removing the channel stops supabase-js retrying
+            return;
+          }
+        }
         if (state === 'CLOSED' && t.signals.size > 0 && !t.rejoinTimer) {
           // Closed from the server side: start over with a fresh channel
           t.rejoinTimer = setTimeout(() => {
@@ -187,7 +220,10 @@ function join(name: string, t: Topic) {
 export function listen(name: string, onSignal: SignalListener, onStatus: StatusListener): () => void {
   let t = topics.get(name);
   if (!t) {
-    t = { channel: null, status: 'connecting', signals: new Set(), statuses: new Set(), leaveTimer: null, rejoinTimer: null };
+    t = {
+      channel: null, status: 'connecting', signals: new Set(), statuses: new Set(),
+      leaveTimer: null, rejoinTimer: null, failures: 0, gaveUp: false,
+    };
     topics.set(name, t);
     initVisibility();
     if (!hiddenLeft) join(name, t);
@@ -230,7 +266,7 @@ export function isResuming() {
 function initVisibility() {
   if (visibilityReady || typeof document === 'undefined') return;
   visibilityReady = true;
-  subscribeActivity((next) => {
+  subscribeActivity((next, prev) => {
     if (next === 'hidden') {
       if (hiddenTimer || hiddenLeft) return;
       hiddenTimer = setTimeout(() => {
@@ -245,6 +281,7 @@ function initVisibility() {
       clearTimeout(hiddenTimer);
       hiddenTimer = null;
     }
+    if (prev === 'hidden') retryGivenUp('tab visible again');
     if (hiddenLeft) {
       hiddenLeft = false;
       log('tab visible again → rejoining channels');
