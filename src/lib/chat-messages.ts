@@ -1,34 +1,111 @@
 /**
  * Chat history loaders shared by the message routes and /api/sync.
- * Pass `afterId` to get only messages newer than that id.
+ *
+ * With no options they load the whole chat (a chat's first load). After that
+ * the client sends `after` (the newest message id it holds) and `since` (the
+ * `cursor` from its previous response) and gets back only messages newer than
+ * `after` plus older ones that changed since `since`: edits, deletes,
+ * reactions, pins, reads, and card changes (see message-touch). `afterId`
+ * alone (older clients' idle check) returns new messages only.
  */
 
 import { getServiceClient } from '@/src/lib/api-helpers';
-import { isEventDissolved } from '@/src/lib/events';
+import { EVENT_GRACE_MS, isEventDissolved } from '@/src/lib/events';
 
 type Db = ReturnType<typeof getServiceClient>;
-interface LoadOptions { afterId?: number }
+type Row = Record<string, unknown>;
+interface LoadOptions { afterId?: number; since?: string }
 type AccessDenied = { status: number; message: string } | null;
 
+// Look this much further back than the client's cursor, to cover clock
+// differences between servers and writes still in flight during the last
+// fetch. Recent changes may therefore arrive twice; clients merge by id.
+const CHANGE_OVERLAP_MS = 10_000;
+
+/** Read `after` and `since` from a chat fetch's query string. */
+export function readChatCursor(params: URLSearchParams): LoadOptions {
+  const afterId = Number(params.get('after')) || 0;
+  const sinceMs = Date.parse(params.get('since') || '');
+  if (Number.isNaN(sinceMs)) return { afterId };
+  return { afterId, since: new Date(sinceMs - CHANGE_OVERLAP_MS).toISOString() };
+}
+
+/** The `cursor` for the client's next fetch. Take it before loading anything. */
+export function newChatCursor() {
+  return new Date().toISOString();
+}
+
+function byCreatedAt(a: Row, b: Row) {
+  return new Date(a.created_at as string).getTime() - new Date(b.created_at as string).getTime();
+}
+
+function uniqueIds(rows: Row[] | null, column: string, exclude: Set<number>) {
+  return Array.from(new Set((rows || []).map((r) => r[column] as number).filter((id) => id && !exclude.has(id))));
+}
+
+const MAIN_COLUMNS =
+  'id, user_id, content, created_at, updated_at, is_edited, reply_to_message_id, is_pinned, event_id, listing_id, is_deleted, group_id, is_active_announcement, announcement_expires_at';
+
+/**
+ * Main chat rows that are new or changed since `since`. Besides updated_at
+ * this catches changes nobody writes: new reads, announcements expiring, and
+ * event cards turning "ended" at the end time and "deleted" 24h later.
+ */
+async function loadChangedMainRows(db: Db, groupId: string, afterId: number, since: string): Promise<Row[]> {
+  const now = Date.now();
+  const nowIso = new Date(now).toISOString();
+  const graceSince = new Date(Date.parse(since) - EVENT_GRACE_MS).toISOString();
+  const graceNow = new Date(now - EVENT_GRACE_MS).toISOString();
+
+  const [{ data: rows, error: rowsErr }, { data: reads }, { data: endedEvents }] = await Promise.all([
+    db.from('messages').select(MAIN_COLUMNS).or(
+      `id.gt.${afterId},updated_at.gt."${since}",and(announcement_expires_at.gt."${since}",announcement_expires_at.lte."${nowIso}")`
+    ),
+    db.from('message_reads').select('message_id').gt('read_at', since),
+    db.from('events').select('message_id').not('message_id', 'is', null).or(
+      `and(end_datetime.gt."${since}",end_datetime.lte."${nowIso}"),and(end_datetime.gt."${graceSince}",end_datetime.lte."${graceNow}")`
+    ),
+  ]);
+  if (rowsErr) throw new Error(`Failed to load messages: ${rowsErr.message}`);
+
+  const found = (rows || []) as Row[];
+  const have = new Set(found.map((m) => m.id as number));
+  const extraIds = uniqueIds([...(reads || []), ...(endedEvents || [])] as Row[], 'message_id', have);
+  if (extraIds.length > 0) {
+    const { data: extra, error: extraErr } = await db.from('messages').select(MAIN_COLUMNS).in('id', extraIds);
+    if (extraErr) throw new Error(`Failed to load messages: ${extraErr.message}`);
+    found.push(...((extra || []) as Row[]));
+  }
+
+  // Filtered here rather than in the queries: the main chat's group test is
+  // itself an OR, and PostgREST takes one top-level OR per query.
+  return found
+    .filter((m) => groupId === 'main' ? (m.group_id === 'main' || m.group_id == null) : m.group_id === groupId)
+    .sort(byCreatedAt);
+}
+
 /** Main (group) chat: messages plus the caller's last_read_message_id. */
-export async function loadMainMessages(db: Db, userId: string, groupId: string, { afterId }: LoadOptions = {}) {
+export async function loadMainMessages(db: Db, userId: string, groupId: string, { afterId, since }: LoadOptions = {}) {
   // Select messages without FK join - the messages table has no REFERENCES constraint
   // so Supabase cannot resolve !messages_user_id_fkey and returns an error silently.
   // We join user data manually below.
-  let query = db.from('messages').select(
-    'id, user_id, content, created_at, updated_at, is_edited, reply_to_message_id, is_pinned, event_id, listing_id, is_deleted, group_id, is_active_announcement, announcement_expires_at'
-  ).order('created_at', { ascending: true });
-
-  if (groupId === 'main') {
-    query = query.or('group_id.eq.main,group_id.is.null');
+  let rawMessages: Row[];
+  if (since) {
+    rawMessages = await loadChangedMainRows(db, groupId, afterId ?? 0, since);
   } else {
-    query = query.eq('group_id', groupId);
+    let query = db.from('messages').select(MAIN_COLUMNS).order('created_at', { ascending: true });
+
+    if (groupId === 'main') {
+      query = query.or('group_id.eq.main,group_id.is.null');
+    } else {
+      query = query.eq('group_id', groupId);
+    }
+    if (afterId) query = query.gt('id', afterId);
+
+    const { data, error: msgErr } = await query;
+    if (msgErr) throw new Error(`Failed to load messages: ${msgErr.message}`);
+    rawMessages = (data || []) as Row[];
   }
-  if (afterId) query = query.gt('id', afterId);
-
-  const { data: rawMessages, error: msgErr } = await query;
-
-  if (msgErr) throw new Error(`Failed to load messages: ${msgErr.message}`);
 
   // Collect unique user IDs and fetch their profiles in one query
   const allUserIds = (rawMessages || []).map((m: Record<string, unknown>) => m.user_id as string);
@@ -243,11 +320,14 @@ export async function loadMainMessages(db: Db, userId: string, groupId: string, 
     }
   }
 
-  // Fetch system messages (app-wide, no group filter) and merge
-  // Incremental fetches (afterId) skip them; the next full load picks them up.
-  const { data: systemMsgs } = afterId
-    ? { data: [] as Record<string, unknown>[] }
-    : await db.from('system_messages').select('*').order('created_at', { ascending: true });
+  // Fetch system messages (app-wide, no group filter) and merge.
+  // Incremental fetches get the ones added or changed since `since`; the
+  // older new-only check (afterId alone) skips them.
+  const { data: systemMsgs } = since
+    ? await db.from('system_messages').select('*').gt('updated_at', since)
+    : afterId
+      ? { data: [] as Record<string, unknown>[] }
+      : await db.from('system_messages').select('*').order('created_at', { ascending: true });
 
   const combined = [
     ...messages,
@@ -277,13 +357,39 @@ export async function checkEventAccess(db: Db, userId: string, eventId: number):
   return null;
 }
 
-export async function loadEventMessages(db: Db, eventId: number, { afterId }: LoadOptions = {}) {
-  // Fetch messages without FK joins
-  let query = db.from('event_messages').select('*').eq('event_id', eventId);
-  if (afterId) query = query.gt('id', afterId);
-  const { data: messages } = await query.order('created_at', { ascending: true });
+/**
+ * Event or listing chat rows: all of them, or (with `since`) the new and
+ * changed ones, including messages read by someone since `since`.
+ */
+async function loadChatRows(
+  db: Db,
+  chat: { table: 'event_messages' | 'listing_messages'; readsTable: string; readsKey: string; column: string; id: number },
+  { afterId, since }: LoadOptions
+): Promise<Row[]> {
+  let query = db.from(chat.table).select('*').eq(chat.column, chat.id);
+  if (since) query = query.or(`id.gt.${afterId ?? 0},updated_at.gt."${since}"`);
+  else if (afterId) query = query.gt('id', afterId);
 
-  if (!messages?.length) return [];
+  const [{ data }, { data: reads }] = await Promise.all([
+    query.order('created_at', { ascending: true }),
+    since ? db.from(chat.readsTable).select(chat.readsKey).gt('read_at', since) : Promise.resolve({ data: null }),
+  ]);
+  const rows = (data || []) as Row[];
+  if (!since) return rows;
+
+  const readIds = uniqueIds(reads as Row[] | null, chat.readsKey, new Set(rows.map((m) => m.id as number)));
+  if (readIds.length === 0) return rows;
+  const { data: extra } = await db.from(chat.table).select('*').eq(chat.column, chat.id).in('id', readIds);
+  return [...rows, ...((extra || []) as Row[])].sort(byCreatedAt);
+}
+
+export async function loadEventMessages(db: Db, eventId: number, options: LoadOptions = {}) {
+  // Fetch messages without FK joins
+  const messages = await loadChatRows(db, {
+    table: 'event_messages', readsTable: 'event_message_reads', readsKey: 'event_message_id', column: 'event_id', id: eventId,
+  }, options);
+
+  if (!messages.length) return [];
 
   // Batch-fetch user data
   const userIds = Array.from(new Set(messages.map((m: Record<string, unknown>) => m.user_id as string).filter(Boolean)));
@@ -383,13 +489,13 @@ export async function checkListingAccess(db: Db, userId: string, listingId: numb
   return null;
 }
 
-export async function loadListingMessages(db: Db, listingId: number, { afterId }: LoadOptions = {}) {
+export async function loadListingMessages(db: Db, listingId: number, options: LoadOptions = {}) {
   // Fetch messages without FK joins (no REFERENCES constraints on listing_messages)
-  let query = db.from('listing_messages').select('*').eq('listing_id', listingId);
-  if (afterId) query = query.gt('id', afterId);
-  const { data: messages } = await query.order('created_at', { ascending: true });
+  const messages = await loadChatRows(db, {
+    table: 'listing_messages', readsTable: 'listing_message_reads', readsKey: 'listing_message_id', column: 'listing_id', id: listingId,
+  }, options);
 
-  if (!messages?.length) return [];
+  if (!messages.length) return [];
 
   // Batch-fetch user data
   const userIds = Array.from(new Set(messages.map((m: Record<string, unknown>) => m.user_id as string).filter(Boolean)));

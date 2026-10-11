@@ -3,14 +3,16 @@ import { authenticate, getServiceClient, json, error } from '@/src/lib/api-helpe
 import { getMainUnreadCount } from '@/src/lib/unread';
 import {
   loadMainMessages, loadEventMessages, loadListingMessages, checkEventAccess, checkListingAccess,
+  newChatCursor, readChatCursor,
 } from '@/src/lib/chat-messages';
 
 /**
  * One request for everything a chat screen needs to stay current, so the
  * client never fans out into several polls:
  *   - header counts: main-chat unread, unread mentions/replies, live admin reminders
- *   - with ?chat=main|event:<id>|listing:<id>&after=<last message id>:
- *     the messages in that chat newer than `after` (used by the 5-minute idle check)
+ *   - with ?chat=main|event:<id>|listing:<id>&after=<last message id>&since=<cursor>:
+ *     what changed in that chat since the last fetch, plus a new cursor
+ *     (used by the 5-minute idle check; see chat-messages)
  *
  * A blocked account gets 403 so the client can sign it out.
  */
@@ -25,7 +27,8 @@ export async function GET(request: NextRequest) {
   }
 
   const chat = request.nextUrl.searchParams.get('chat');
-  const afterId = Number(request.nextUrl.searchParams.get('after')) || 0;
+  const options = readChatCursor(request.nextUrl.searchParams);
+  const cursor = newChatCursor();
 
   const [unreadCount, { count: mentionCount }, { count: reminderCount }, messages] = await Promise.all([
     getMainUnreadCount(db, userId),
@@ -36,23 +39,23 @@ export async function GET(request: NextRequest) {
     db.from('reminders')
       .select('*', { count: 'exact', head: true })
       .gt('expires_at', new Date().toISOString()),
-    chat && afterId ? loadNewMessages(db, userId, chat, afterId) : Promise.resolve(undefined),
+    chat && (options.afterId || options.since) ? loadNewMessages(db, userId, chat, options) : Promise.resolve(undefined),
   ]);
 
   return json({
     unread_count: unreadCount,
     mention_count: mentionCount || 0,
     reminder_count: reminderCount || 0,
-    ...(messages !== undefined && { messages }),
+    ...(messages !== undefined && { messages, cursor }),
   });
 }
 
-/** New messages in one chat, or [] if the caller can no longer see it. */
+/** New and changed messages in one chat, or [] if the caller can no longer see it. */
 async function loadNewMessages(
-  db: ReturnType<typeof getServiceClient>, userId: string, chat: string, afterId: number
+  db: ReturnType<typeof getServiceClient>, userId: string, chat: string, options: ReturnType<typeof readChatCursor>
 ): Promise<unknown[]> {
   if (chat === 'main') {
-    const { messages } = await loadMainMessages(db, userId, 'main', { afterId });
+    const { messages } = await loadMainMessages(db, userId, 'main', options);
     return messages;
   }
 
@@ -62,11 +65,11 @@ async function loadNewMessages(
 
   if (kind === 'event') {
     if (await checkEventAccess(db, userId, id)) return [];
-    return loadEventMessages(db, id, { afterId });
+    return loadEventMessages(db, id, options);
   }
   if (kind === 'listing') {
     if (await checkListingAccess(db, userId, id)) return [];
-    return loadListingMessages(db, id, { afterId });
+    return loadListingMessages(db, id, options);
   }
   return [];
 }

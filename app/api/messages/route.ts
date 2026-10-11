@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server';
 import { authenticate, getServiceClient, json, error, sanitizeHtml } from '@/src/lib/api-helpers';
-import { loadMainMessages } from '@/src/lib/chat-messages';
+import { loadMainMessages, newChatCursor, readChatCursor } from '@/src/lib/chat-messages';
 import { getTypingUsers } from '@/src/lib/typing';
 import { isRateLimited, getClientIp } from '@/src/lib/rate-limit';
 
@@ -10,15 +10,18 @@ export async function GET(request: NextRequest) {
   if (!userId) return error('Unauthorized', 401);
 
   const groupId = request.nextUrl.searchParams.get('group_id') || 'main';
+  // ?after=<id>&since=<cursor>: only what changed since the last fetch (see chat-messages)
+  const options = readChatCursor(request.nextUrl.searchParams);
+  const cursor = newChatCursor();
   const db = getServiceClient();
 
   try {
     const [result, typingUsers] = await Promise.all([
-      loadMainMessages(db, userId, groupId),
+      loadMainMessages(db, userId, groupId, options),
       getTypingUsers(db, userId, 'main', null),
     ]);
     // Return as object so useMessages can read last_read_message_id alongside the array
-    return json({ ...result, typing_users: typingUsers });
+    return json({ ...result, typing_users: typingUsers, cursor });
   } catch (err) {
     console.error('[messages] GET failed:', err);
     return error('Failed to load messages', 500);

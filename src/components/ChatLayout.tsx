@@ -84,7 +84,7 @@ export default function ChatLayout({ groupId, eventName, eventId, onBackToMain, 
   const [showOnboarding, setShowOnboarding] = useState(false);
   
   const { typingUsers, updateTypingUsers, sendTypingStatus } = useTypingStatus({ groupType: "main" });
-  const { messages: rawMessages, appendMessages, lastReadMessageId, isLoading, hasInitiallyLoaded, refetch } = useMessages(groupId || null, { onTypingUsers: updateTypingUsers });
+  const { messages: rawMessages, cursor: messageCursor, lastReadMessageId, isLoading, hasInitiallyLoaded, refetch } = useMessages(groupId || null, { onTypingUsers: updateTypingUsers });
   
   // Ensure messages is always an array to prevent .map() errors
   const messages = Array.isArray(rawMessages) ? rawMessages : [];
@@ -103,11 +103,10 @@ export default function ChatLayout({ groupId, eventName, eventId, onBackToMain, 
     );
   }, [messages]);
   const { users } = useUsers();
-  // Header counts every 30s; while idle, one combined check (counts + new messages) every 5 min
+  // Header counts every 30s; while idle, one combined check (counts + message changes) every 5 min
   const { unreadCount, notificationCount, refetchCounts } = useChatSync({
     chat: groupId === "main" || !groupId ? "main" : undefined,
-    messages,
-    onNewMessages: appendMessages,
+    cursor: messageCursor,
     withCounts: true,
   });
   const { showToast } = useToast();

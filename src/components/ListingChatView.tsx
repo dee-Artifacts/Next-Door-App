@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { usePolling } from "@/src/hooks/usePolling";
-import { useChatSync, mergeNewMessages } from "@/src/hooks/useChatSync";
+import { useChatSync } from "@/src/hooks/useChatSync";
+import { useMessageCursor } from "@/src/hooks/useMessageCursor";
 import { stopIfDenied } from "@/src/lib/session-guard";
 import { useAuth } from "@/src/lib/auth-hook";
 import { Package, CheckCircle, X } from "lucide-react";
@@ -85,14 +86,17 @@ export default function ListingChatView({ listingId, onBack }: ListingChatViewPr
     fetchListing();
   }, [listingId]);
 
-  // Fetch messages
+  // Fetch messages: the first fetch loads the whole chat; later ones only what changed
+  const messageCursor = useMessageCursor(`listing:${listingId}`, setMessages);
   const fetchMessages = async () => {
+    const ticket = messageCursor.begin();
+    ticket.params.set('with_typing', '1');
     try {
-      const response = await fetch(`/api/listings/${listingId}/messages?with_typing=1`, { credentials: 'include' });
+      const response = await fetch(`/api/listings/${listingId}/messages?${ticket.params}`, { credentials: 'include' });
       if (response.ok) {
         const body = await response.json();
         const data = Array.isArray(body) ? body : body.messages;
-        setMessages(Array.isArray(data) ? data : []);
+        messageCursor.apply(ticket, Array.isArray(data) ? data : [], body.cursor);
         updateTypingUsers(body.typing_users);
       } else {
         return stopIfDenied(response);
@@ -130,12 +134,8 @@ export default function ListingChatView({ listingId, onBack }: ListingChatViewPr
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [listingId]);
   usePolling(fetchMembers, 30_000);
-  // While idle: one check for new messages every 5 minutes instead of the polls above
-  useChatSync({
-    chat: `listing:${listingId}`,
-    messages,
-    onNewMessages: (incoming) => setMessages((prev) => mergeNewMessages(prev, incoming)),
-  });
+  // While idle: one check for message changes every 5 minutes instead of the polls above
+  useChatSync({ chat: `listing:${listingId}`, cursor: messageCursor });
 
   // Remove optimistic messages when confirmed
   useEffect(() => {

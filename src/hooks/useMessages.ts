@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import type { Message, SystemMessage } from "@/src/lib/types";
 import type { TypingUser } from "@/src/hooks/useTypingStatus";
-import { mergeNewMessages } from "@/src/hooks/useChatSync";
+import { useMessageCursor } from "@/src/hooks/useMessageCursor";
 import { stopIfDenied } from "@/src/lib/session-guard";
 
 type MessageOrSystem = Message | SystemMessage;
@@ -19,10 +19,15 @@ export function useMessages(groupId?: string | null, { onTypingUsers }: UseMessa
   const hasInitiallyLoadedRef = useRef(false);
   const onTypingUsersRef = useRef(onTypingUsers);
   onTypingUsersRef.current = onTypingUsers;
+  // First fetch loads the whole chat; later ones only what changed
+  const cursor = useMessageCursor<MessageOrSystem>(groupId || "main", setMessages);
 
   const fetchMessages = useCallback(async () => {
     try {
-      const url = groupId ? `/api/messages?group_id=${encodeURIComponent(groupId)}` : "/api/messages";
+      const ticket = cursor.begin();
+      if (groupId) ticket.params.set("group_id", groupId);
+      const query = ticket.params.toString();
+      const url = `/api/messages${query ? `?${query}` : ""}`;
       const response = await fetch(url, { credentials: 'include' });
       if (!response.ok) {
         const stop = await stopIfDenied(response);
@@ -42,7 +47,7 @@ export function useMessages(groupId?: string | null, { onTypingUsers }: UseMessa
           setMessages([]);
         }
       } else {
-        setMessages(messageArray);
+        cursor.apply(ticket, messageArray, data.cursor);
       }
 
       setLastReadMessageId(data.last_read_message_id || null);
@@ -59,20 +64,16 @@ export function useMessages(groupId?: string | null, { onTypingUsers }: UseMessa
     } finally {
       setIsLoading(false);
     }
-  }, [groupId]);
+  }, [groupId, cursor]);
 
   useEffect(() => {
     fetchMessages();
   }, [fetchMessages]);
 
-  // New messages from the idle check (/api/sync); the next full fetch reconciles everything.
-  const appendMessages = useCallback((incoming: MessageOrSystem[]) => {
-    setMessages((prev) => mergeNewMessages(prev, incoming));
-  }, []);
-
   return {
     messages,
-    appendMessages,
+    /** Shared with the idle check (useChatSync) so it fetches only what changed too. */
+    cursor,
     lastReadMessageId,
     isLoading,
     hasInitiallyLoaded,

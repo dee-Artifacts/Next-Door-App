@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { usePolling } from "@/src/hooks/usePolling";
-import { useChatSync, mergeNewMessages } from "@/src/hooks/useChatSync";
+import { useChatSync } from "@/src/hooks/useChatSync";
+import { useMessageCursor } from "@/src/hooks/useMessageCursor";
 import { stopIfDenied } from "@/src/lib/session-guard";
 import { useAuth } from "@/src/lib/auth-hook";
 import ChatHeader from "@/src/components/ChatHeader";
@@ -145,6 +146,8 @@ export default function EventChatView({ eventId, eventName, onBack }: EventChatV
   const [messageInfoId, setMessageInfoId] = useState<number | null>(null);
   
   const { typingUsers, updateTypingUsers, sendTypingStatus } = useTypingStatus({ groupType: "event", groupId: String(eventId) });
+  // First fetch loads the whole chat; later ones only what changed
+  const messageCursor = useMessageCursor(`event:${eventId}`, setMessages);
 
   useEffect(() => {
     fetchMembers();
@@ -156,12 +159,8 @@ export default function EventChatView({ eventId, eventName, onBack }: EventChatV
   // Poll messages (and who is typing) every 5 seconds; details and members change rarely
   usePolling(() => fetchMessages(), 5000);
   usePolling(() => Promise.all([fetchMembers(), fetchEventDetails()]), 30_000);
-  // While idle: one check for new messages every 5 minutes instead of the polls above
-  useChatSync({
-    chat: `event:${eventId}`,
-    messages,
-    onNewMessages: (incoming) => setMessages((prev) => mergeNewMessages(prev, incoming)),
-  });
+  // While idle: one check for message changes every 5 minutes instead of the polls above
+  useChatSync({ chat: `event:${eventId}`, cursor: messageCursor });
 
   // Remove optimistic messages when their real counterparts arrive
   useEffect(() => {
@@ -200,8 +199,10 @@ export default function EventChatView({ eventId, eventName, onBack }: EventChatV
   }, [messages, optimisticMessages]);
 
   const fetchMessages = async () => {
+    const ticket = messageCursor.begin();
+    ticket.params.set('with_typing', '1');
     try {
-      const response = await fetch(`/api/events/${eventId}/messages?with_typing=1`, {
+      const response = await fetch(`/api/events/${eventId}/messages?${ticket.params}`, {
         credentials: 'include',
       });
       if (response.ok) {
@@ -217,18 +218,21 @@ export default function EventChatView({ eventId, eventName, onBack }: EventChatV
             setEventDetails(detailsMessage.event_details);
           }
           
-          setMessages(data);
+          messageCursor.apply(ticket, data, body.cursor);
           // Read receipts are sent by EventMessageList as messages come into view
         } else {
           console.error("Invalid response format from /api/events/:id/messages:", data);
+          messageCursor.reset();
           setMessages([]);
         }
       } else {
+        messageCursor.reset();
         setMessages([]);
         return stopIfDenied(response);
       }
     } catch (error) {
       console.error("Error fetching event messages:", error);
+      messageCursor.reset();
       setMessages([]);
     } finally {
       setIsLoadingMessages(false);

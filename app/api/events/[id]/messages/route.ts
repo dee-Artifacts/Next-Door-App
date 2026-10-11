@@ -1,7 +1,7 @@
 import { NextRequest } from 'next/server';
 import { authenticate, getServiceClient, json, error, sanitizeHtml } from '@/src/lib/api-helpers';
 import { isEventDissolved } from '@/src/lib/events';
-import { checkEventAccess, loadEventMessages } from '@/src/lib/chat-messages';
+import { checkEventAccess, loadEventMessages, newChatCursor, readChatCursor } from '@/src/lib/chat-messages';
 import { getTypingUsers } from '@/src/lib/typing';
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -14,13 +14,16 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const denied = await checkEventAccess(db, userId, eventId);
   if (denied) return error(denied.message, denied.status);
 
-  // ?with_typing=1 (the chat view's poll) also returns who is typing, saving a separate request
+  // ?with_typing=1 (the chat view's poll) also returns who is typing, saving a separate request,
+  // and a cursor; with ?after=<id>&since=<cursor> only what changed since the last fetch
   if (request.nextUrl.searchParams.get('with_typing') === '1') {
+    const options = readChatCursor(request.nextUrl.searchParams);
+    const cursor = newChatCursor();
     const [messages, typingUsers] = await Promise.all([
-      loadEventMessages(db, eventId),
+      loadEventMessages(db, eventId, options),
       getTypingUsers(db, userId, 'event', String(eventId)),
     ]);
-    return json({ messages, typing_users: typingUsers });
+    return json({ messages, typing_users: typingUsers, cursor });
   }
   return json(await loadEventMessages(db, eventId));
 }
