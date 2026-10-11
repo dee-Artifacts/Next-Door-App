@@ -328,7 +328,7 @@ CREATE TABLE IF NOT EXISTS typing_status (
   id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   user_id TEXT NOT NULL,
   group_type TEXT NOT NULL,
-  group_id TEXT,
+  group_id TEXT NOT NULL, -- 'main' for the main chat (NULL would defeat the UNIQUE below)
   last_typed_at TIMESTAMPTZ DEFAULT NOW(),
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW(),

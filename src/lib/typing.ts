@@ -7,21 +7,27 @@ export type TypingGroupType = 'main' | 'event' | 'listing';
 // window has to cover one full poll gap or the indicator flickers off.
 const TYPING_WINDOW_MS = 8000;
 
+/**
+ * group_id stored for a chat. The main chat has no id; it is stored as 'main'
+ * rather than NULL so the (user_id, group_type, group_id) unique index makes
+ * the typing upsert update one row per user instead of adding a row per ping.
+ */
+export function typingGroupId(groupId: string | number | null | undefined): string {
+  return groupId ? String(groupId) : 'main';
+}
+
 /** Users (other than the caller) who typed in this chat within the window. */
 export async function getTypingUsers(db: Db, userId: string, groupType: string, groupId: string | null) {
   const cutoff = new Date(Date.now() - TYPING_WINDOW_MS).toISOString();
 
   // Two plain queries: the live DB has no FK for an embedded users join
-  let query = db
+  const { data: rows } = await db
     .from('typing_status')
     .select('user_id')
     .eq('group_type', groupType)
+    .eq('group_id', typingGroupId(groupId))
     .neq('user_id', userId)
     .gt('last_typed_at', cutoff);
-
-  query = groupId ? query.eq('group_id', groupId) : query.is('group_id', null);
-
-  const { data: rows } = await query;
   if (!rows?.length) return [];
 
   const userIds = Array.from(new Set(rows.map((row: { user_id: string }) => row.user_id)));

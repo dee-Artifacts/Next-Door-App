@@ -1,5 +1,6 @@
 import { NextRequest } from 'next/server';
 import { authenticate, getServiceClient, json, error } from '@/src/lib/api-helpers';
+import { typingGroupId } from '@/src/lib/typing';
 
 export async function POST(request: NextRequest) {
   const userId = await authenticate();
@@ -16,7 +17,7 @@ export async function POST(request: NextRequest) {
   await db.from('typing_status').upsert({
     user_id: userId,
     group_type,
-    group_id: group_id || null,
+    group_id: typingGroupId(group_id),
     last_typed_at: new Date().toISOString(),
   }, { onConflict: 'user_id,group_type,group_id' });
 

@@ -72,12 +72,19 @@ export async function POST(request: NextRequest) {
       .eq('is_active_announcement', true)
       .lt('announcement_expires_at', nowIso);
 
+    // ── 3. Clear old typing rows (only the last few seconds matter) ──────────
+    const { count: clearedTyping } = await db
+      .from('typing_status')
+      .delete({ count: 'exact' })
+      .lt('last_typed_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString());
+
     return Response.json({
       success: true,
       done: done && failedIds.length === 0,
       dissolved_events: deletedEvents,
       failed_events: failedIds,
       expired_announcements: expiredAnnouncements ?? 0,
+      cleared_typing: clearedTyping ?? 0,
       ms: Date.now() - started,
     });
   } catch (error) {
